@@ -16,7 +16,7 @@
   var KEYCODE_TO_CODE = {
     37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 40: 'ArrowDown',
     13: 'Enter', 32: 'Space', 27: 'Escape', 16: 'ShiftLeft', 116: 'F5',
-    65: 'KeyA', 66: 'KeyB', 67: 'KeyC', 83: 'KeyS', 88: 'KeyX', 89: 'KeyY', 90: 'KeyZ'
+    65: 'KeyA', 66: 'KeyB', 67: 'KeyC', 68: 'KeyD', 81: 'KeyQ', 83: 'KeyS', 87: 'KeyW', 88: 'KeyX', 89: 'KeyY', 90: 'KeyZ'
   };
 
   var BIND = {};          // elementId -> KeyboardEvent.code

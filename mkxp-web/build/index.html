@@ -226,7 +226,7 @@
         #d-left  { left: 0; top: 33.3%; }
         #d-right { right: 0; top: 33.3%; }
 
-        /* Face buttons: A (confirm) up-right, B (back / menu) down-left, small Z (action). */
+        /* Face buttons: C (confirm) up-right, X (back / menu) down-left; small Z / D above. */
         #apad {
             right: calc(18px + env(safe-area-inset-right));
             bottom: calc(18px + env(safe-area-inset-bottom));
@@ -239,20 +239,25 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12);
             -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
         }
-        #ap-c { right: 0; top: 18%; color: #ff8a8a; }
-        #ap-b { right: calc(var(--btn) * 1.02); top: calc(18% + var(--btn) * 0.72); color: #ffd36e; }
-        #ap-a { width: calc(var(--btn) * 0.62) !important; height: calc(var(--btn) * 0.62) !important;
-                font-size: calc(var(--btn) * 0.26); right: calc(var(--btn) * 1.28); top: 0; }
+        #ap-c { right: 0; top: 30%; color: #ff8a8a; }
+        #ap-b { right: calc(var(--btn) * 1.02); top: calc(30% + var(--btn) * 0.72); color: #ffd36e; }
+        #apad .key.small { width: calc(var(--btn) * 0.6); height: calc(var(--btn) * 0.6);
+                           font-size: calc(var(--btn) * 0.26); top: 0; }
+        #ap-a { right: calc(var(--btn) * 1.22); }
+        #ap-d { right: calc(var(--btn) * 0.2); }
         #apad .key.dpad-active { background: var(--glass-hi); border-color: rgba(255,255,255,0.5);
                                  box-shadow: 0 2px 6px rgba(0,0,0,0.4), inset 0 0 12px rgba(255,255,255,0.15); }
 
-        /* Shoulder buttons: L / R = page up / down in lists (keys A / S). */
+        /* Shoulder rows: Q A (left) and S W (right), labelled with their keyboard letter. */
         .shoulder {
             bottom: calc(18px + env(safe-area-inset-bottom) + var(--pad) + 12px);
-            width: calc(var(--btn) * 1.15); height: calc(var(--btn) * 0.46);
+            display: none; gap: 8px;
+            height: calc(var(--btn) * 0.46);
         }
+        @media (pointer: coarse) { .vpad.shoulder { display: flex; } }
         .shoulder .key {
-            inset: 0; border-radius: 999px;
+            position: relative;
+            width: calc(var(--btn) * 0.95); height: 100%; border-radius: 999px;
             background: var(--glass); border: 1.5px solid var(--edge);
             font-size: calc(var(--btn) * 0.24); letter-spacing: 0.08em;
             box-shadow: 0 3px 10px rgba(0,0,0,0.4);
@@ -339,7 +344,7 @@
         <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1 width="640" height="480"></canvas>
 
         <div id="dpad" class="vpad" aria-hidden="true">
-            <svg class="cross" viewBox="0 0 90 90"><path d="M36 2h18a6 6 0 0 1 6 6v22a6 6 0 0 0 6 6h14a6 6 0 0 1 6 6v6a6 6 0 0 1-6 6H66a6 6 0 0 0-6 6v14a6 6 0 0 1-6 6H36a6 6 0 0 1-6-6V60a6 6 0 0 0-6-6H10a6 6 0 0 1-6-6v-6a6 6 0 0 1 6-6h14a6 6 0 0 0 6-6V8a6 6 0 0 1 6-6z" transform="translate(0 0) scale(1)" fill="rgba(18,20,28,0.58)" stroke="rgba(255,255,255,0.22)" stroke-width="1.2"/><circle cx="45" cy="45" r="7" fill="rgba(255,255,255,0.08)"/></svg>
+            <svg class="cross" viewBox="0 0 90 90"><path d="M36 2H54A6 6 0 0 1 60 8V26A4 4 0 0 0 64 30H82A6 6 0 0 1 88 36V54A6 6 0 0 1 82 60H64A4 4 0 0 0 60 64V82A6 6 0 0 1 54 88H36A6 6 0 0 1 30 82V64A4 4 0 0 0 26 60H8A6 6 0 0 1 2 54V36A6 6 0 0 1 8 30H26A4 4 0 0 0 30 26V8A6 6 0 0 1 36 2Z" fill="rgba(18,20,28,0.58)" stroke="rgba(255,255,255,0.22)" stroke-width="1.2"/><circle cx="45" cy="45" r="7" fill="rgba(255,255,255,0.08)"/></svg>
             <div id="d-up" class="key"><svg viewBox="0 0 24 24" style="transform:rotate(0deg)"><path d="M6 15l6-6 6 6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
             <div id="d-right" class="key"><svg viewBox="0 0 24 24" style="transform:rotate(90deg)"><path d="M6 15l6-6 6 6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
             <div id="d-down" class="key"><svg viewBox="0 0 24 24" style="transform:rotate(180deg)"><path d="M6 15l6-6 6 6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -347,13 +352,18 @@
         </div>
 
         <div id="apad" class="vpad" aria-hidden="true">
-            <div id="ap-a" class="key">Z</div>
-            <div id="ap-c" class="key">A</div>
-            <div id="ap-b" class="key">B</div>
+            <div id="ap-a" class="key small">Z</div>
+            <div id="ap-d" class="key small">D</div>
+            <div id="ap-c" class="key">C</div>
+            <div id="ap-b" class="key">X</div>
         </div>
 
-        <div id="lpad" class="vpad shoulder" aria-hidden="true"><div id="sh-l" class="key">L</div></div>
-        <div id="rpad" class="vpad shoulder" aria-hidden="true"><div id="sh-r" class="key">R</div></div>
+        <div id="lpad" class="vpad shoulder" aria-hidden="true">
+            <div id="sh-q" class="key">Q</div><div id="sh-a" class="key">A</div>
+        </div>
+        <div id="rpad" class="vpad shoulder" aria-hidden="true">
+            <div id="sh-s" class="key">S</div><div id="sh-w" class="key">W</div>
+        </div>
     </div>
 
     <div onclick="fullscreen()" id="fullscreen">
@@ -823,7 +833,10 @@
         var bitmapSizeMapping = {};
 
         // Virtual gamepad bindings (the pad itself is only displayed on touch devices, via CSS).
-        //   A = C (confirm), B = X (back / menu), Z = Z, L / R = A / S (page up / down in lists)
+        //   Every button is labelled with the keyboard key it sends (what the game's own prompts
+        //   name): C (confirm / USE), X (back / menu), Z (ACTION), D (SPECIAL), A / S (JUMPUP /
+        //   JUMPDOWN, e.g. page up/down in lists; some games bind items to them),
+        //   Q / W (AUX1 / AUX2).
         bindKey('d-up', 38);
         bindKey('d-right', 39);
         bindKey('d-down', 40);
@@ -831,8 +844,11 @@
         bindKey('ap-c', 67);
         bindKey('ap-b', 88);
         bindKey('ap-a', 90);
-        bindKey('sh-l', 65);
-        bindKey('sh-r', 83);
+        bindKey('ap-d', 68);
+        bindKey('sh-q', 81);
+        bindKey('sh-a', 65);
+        bindKey('sh-s', 83);
+        bindKey('sh-w', 87);
 
         resize();
     </script>
