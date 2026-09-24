@@ -49,3 +49,14 @@ patch(//, /\A(?=.*\$!(?!"))(.*)\z/m, proc { |m|
 patch(/\APokemon_Owner\z/, "    def initialize(id, name, gender, language)\n", "    def initialize(id, name, gender, language)\n      id = id.to_i if id.is_a?(Float)\n")
 patch(/\APokemon_Owner\z/, "    attr_reader :id\n", "    def id; @id = @id.to_i if @id.is_a?(Float); @id; end\n")
 patch(/\ATrainer_Class\z/, "  attr_accessor :id\n", "  attr_writer :id\n  def id; @id = @id.to_i if @id.is_a?(Float); @id; end\n")
+
+# --- Loading a save must use THAT save's play time. Essentials loads the "bootup" values
+#     ($stats, $game_system, versions) once at boot from the newest slot, and Game.load's
+#     load_all_values skips values already loaded. With several slots (Multi Save), or a
+#     save that appeared after boot (a cloud download, or no save at boot at all), the
+#     game continued with another slot's $stats (or a fresh one: "Tiempo 0m") and saved
+#     it over the loaded file. Options ($PokemonSystem) stay as set on the load screen.
+patch(/\AStartGame\z/, "    validate save_data => Hash\n    SaveData.load_all_values(save_data)\n",
+      "    validate save_data => Hash\n" \
+      "    SaveData.instance_variable_get(:@values).each { |v| v.mark_as_unloaded if v.id != :pokemon_system }\n" \
+      "    SaveData.load_all_values(save_data)\n")

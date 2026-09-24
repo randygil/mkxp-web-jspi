@@ -1891,16 +1891,84 @@ module Audio
 end
 
 #===========================================================
-# WEB PORT SHIM — Marshal support for Time (in-game saving).
-# pulsejet/mruby-marshal cannot dump mruby-time's Time (MRB_TT_DATA) — it raised
-# TypeError, which Essentials' pbSave swallowed as "Save failed.". $PokemonGlobal
-# carries live Time objects (@startTime, @pokerusTime). Provide _dump/_load so
-# Time round-trips as an integer epoch. (mruby-marshal checks _dump before the
-# TT_DATA branch and passes one arg; return a String, RSTRING_PTR is used.)
+# WEB PORT SHIM — Marshal support for Time (in-game saving), in CRuby's format.
+# mruby-marshal cannot dump mruby-time's Time (MRB_TT_DATA) by itself; saves carry
+# live Time objects ($player.last_time_saved, @startTime, @pokerusTime...).
+# The dump is byte-compatible with CRuby's Time#_dump (time_mdump), so saves move
+# between mkxp-web and mkxp-z (PC / Switch):
+#   8 bytes, two little-endian 32-bit words, the broken-down UTC time:
+#     p = 1<<31 | utc?<<30 | (year-1900)<<14 | (mon-1)<<10 | mday<<5 | hour
+#     s = min<<26 | sec<<20 | usec
+#   plus the ivars of the dumped string: :offset (UTC offset in seconds, local times),
+#   :zone, and :nano_num/:nano_den/:submicro (sub-microsecond part).
+# mruby strings hold no ivars, so the vendored mruby-marshal (extra/mruby-marshal)
+# takes them from #_dump_ivars and hands them to Time._load_ivars.
+# Until 2026-09 the web wrote the epoch as a decimal string ("1790000000"); that is
+# still read. mruby's Time has no fixed-offset zone: a loaded time is the same instant
+# in the browser's local zone, and re-dumps the offset/zone/nanoseconds it came with.
 #===========================================================
 class Time
-  def _dump(*a); self.to_i.to_s; end
-  def self._load(s); Time.at(s.to_i); end
+  def self.__web_days_from_civil(y, m, d)
+    y -= 1 if m <= 2
+    era = (y >= 0 ? y : y - 399) / 400
+    yoe = y - era * 400
+    doy = (153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1
+    doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    era * 146097 + doe - 719468
+  end
+
+  # Seconds east of UTC (mruby-time has no utc_offset).
+  def utc_offset
+    return 0 if utc?
+    Time.__web_days_from_civil(year, mon, day) * 86400 + hour * 3600 + min * 60 + sec - to_i
+  end unless method_defined?(:utc_offset)
+  alias_method :gmt_offset, :utc_offset unless method_defined?(:gmt_offset)
+  alias_method :gmtoff, :utc_offset unless method_defined?(:gmtoff)
+
+  def _dump(*)
+    u = getutc
+    p = (1 << 31) | ((utc? ? 1 : 0) << 30) | ((u.year - 1900) << 14) |
+        ((u.mon - 1) << 10) | (u.day << 5) | u.hour
+    s = (u.min << 26) | (u.sec << 20) | (usec & 0xfffff)
+    [p, s].pack("VV")
+  end
+
+  def _dump_ivars
+    iv = @__marshal_ivars
+    return iv if iv.is_a?(Hash) && !iv.empty? && (iv.has_key?(:offset) != utc?)
+    utc? ? { :zone => "UTC" } : { :offset => utc_offset }
+  end
+
+  def self._load(data)
+    _load_ivars(data, nil)
+  end
+
+  def self._load_ivars(data, ivars)
+    data = data.to_s
+    digits = true
+    data.bytesize.times { |i| b = data.getbyte(i); digits = false unless b >= 48 && b <= 57 }
+    if data.bytesize != 8 || digits
+      return Time.at(data.to_i) # mkxp-web before 2026-09: decimal epoch seconds
+    end
+    p, s = data.unpack("VV")
+    if (p & (1 << 31)) == 0
+      t = Time.at(p, s)         # CRuby's pre-1.9 layout: seconds, microseconds
+    else
+      year = ((p >> 14) & 0xffff) + 1900
+      year = ivars[:year] if ivars && ivars[:year].is_a?(Integer)
+      mon  = ((p >> 10) & 0xf) + 1
+      mday = (p >> 5) & 0x1f
+      hour = p & 0x1f
+      min  = (s >> 26) & 0x3f
+      sec  = (s >> 20) & 0x3f
+      usec = s & 0xfffff
+      epoch = __web_days_from_civil(year, mon, mday) * 86400 + hour * 3600 + min * 60 + sec
+      t = Time.at(epoch, usec)
+      t = t.getutc if ((p >> 30) & 1) == 1
+    end
+    t.instance_variable_set(:@__marshal_ivars, ivars) if ivars && !ivars.empty?
+    t
+  end
 end
 
 #===========================================================
@@ -1997,9 +2065,13 @@ end
 # The in-memory String forms (string_out/string_in) do zero funcalls and are fast. So:
 #   * dump writes a 4-byte length prefix + the whole marshal buffer in one io.write.
 #   * load bulk-reads exactly that stream (one io.read) and loads it from the String.
-# Legacy un-prefixed saves are detected (their first 4 bytes are the marshal version 04 08,
-# i.e. an implausibly huge "length") and fall back to the native byte reader after
-# un-reading the header -- correct, just slow, so old saves still open.
+# Standard un-prefixed streams (old web saves, and every save written by mkxp-z on PC /
+# Switch) are detected (their first 4 bytes are the marshal version 04 08, i.e. an
+# implausibly huge "length"): the rest of the file is read in one go, one object is loaded
+# from memory (Marshal.__load_partial) and the stream is put right after it. Only an IO
+# without seek falls back to the native byte reader (correct, just slow).
+# NOTE: the prefix makes web saves unreadable by a stock Marshal.load (mkxp-z); anything
+# that moves saves between engines must strip it (4-byte big-endian length) / add it back.
 if Object.const_defined?(:Marshal) && Marshal.respond_to?(:dump) && !Marshal.respond_to?(:__mkxp_str_dump)
   module Marshal
     class << self
@@ -2022,6 +2094,15 @@ if Object.const_defined?(:Marshal) && Marshal.respond_to?(:dump) && !Marshal.res
         return __mkxp_str_load(src) unless h.is_a?(String) && h.bytesize == 4
         n = h.unpack("N").first
         return __mkxp_str_load(src.read(n)) if n && n >= 0 && n <= LP_MAX
+        # Standard (un-prefixed) stream, e.g. a save written by mkxp-z / RPG Maker:
+        # load it from memory and put the stream right after the object, so several
+        # dumps in one file still load one by one.
+        if Marshal.respond_to?(:__load_partial) && src.respond_to?(:seek) && src.respond_to?(:pos)
+          start = src.pos - 4
+          obj, used = __load_partial(h + (src.read || ""))
+          src.seek(start + used)
+          return obj
+        end
         (src.ungetc(h) rescue nil)                            # legacy stream: restore header
         __mkxp_str_load(src)
       end

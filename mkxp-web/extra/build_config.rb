@@ -15,7 +15,10 @@ MRuby::CrossBuild.new('wasm32-unknown-gnu') do |conf|
     # and breaks the build. Declared BEFORE marshal so its add_dependency resolves
     # to this pinned commit instead of re-cloning master.
     conf.gem :github => 'mattn/mruby-onig-regexp', :checksum_hash => '074325207f9181ad242ffb8de34072607164f57f'
-    conf.gem :github => 'pulsejet/mruby-marshal'
+    # WEB PORT: pulsejet/mruby-marshal, vendored in extra/mruby-marshal with CRuby-format
+    # fixes (Bignum, Float, String encoding, Time ivars, link order) so savefiles are
+    # interchangeable with mkxp-z. See the WEB PORT notes in its src/marshal.cpp.
+    conf.gem "#{MRUBY_ROOT}/../../extra/mruby-marshal"
     conf.gem :github => 'monochromegane/mruby-time-strftime'
     conf.gem :core => 'mruby-eval'
     conf.cc.command = 'emcc'

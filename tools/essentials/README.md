@@ -70,6 +70,12 @@ These are part of the engine, not these tools.
   - Instance variables on Array/String subclasses.
 - **`extra/build_config.rb` + `CMakeLists.txt`**: 64-bit `Integer` (`MRB_INT64`) and the method
   cache.
+- **`extra/mruby-marshal`** (vendored pulsejet/mruby-marshal) + the `Time` shim in
+  `extra/rgss.rb`: saves are byte-format compatible with mkxp-z (CRuby), so they move
+  between web, PC and Switch. Bignums (`'l'`, e.g. trainer IDs >= 2**30), shortest-exact
+  Floats, UTF-8 string encoding, CRuby's `Time` dump (8 bytes + `:offset`/`:zone`/nanoseconds)
+  and CRuby's object-link numbering. Web saves keep the 4-byte length prefix (see
+  `Marshal.dump(obj, io)` in `rgss.rb`); un-prefixed saves from mkxp-z load directly.
 - **Bindings**:
   - `Font#name=` (it was a no-op) and the `Font.new` / `default_name=` arrays;
   - `Bitmap.max_size`, `Bitmap#mega?`;

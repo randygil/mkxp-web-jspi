@@ -176,6 +176,18 @@ class Bitmap
 end
 
 class String
+  # mruby's each_byte is built on #bytes; plugins that redefine #bytes on top of
+  # each_byte (Luka's Scripting Utilities) then recurse forever (SystemStackError).
+  def each_byte(&block)
+    return to_enum(:each_byte) unless block
+    i = 0
+    n = bytesize
+    while i < n
+      block.call(getbyte(i))
+      i += 1
+    end
+    self
+  end
   def force_encoding(*a); self; end unless method_defined?(:force_encoding)
   def encoding; Encoding::UTF_8; end unless method_defined?(:encoding)
   def encode(*a); dup; end unless method_defined?(:encode)
