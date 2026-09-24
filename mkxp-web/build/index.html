@@ -89,6 +89,7 @@
     <!-- Frame-independent BGM player (needs getMappingKey from drive.js + mapping). Optional:
          define window.BGM_LOOP_TABLE before this for intro->loop points. See js/webbgm.js. -->
     <script src="js/webbgm.js"></script>
+    <script src="js/textinput.js"></script>
 
     <title>MKXP</title>
     <style>
@@ -337,7 +338,7 @@
         var BUILD_VER = 'dev';
         var Module = {
             locateFile: function(path){ return (path === 'mkxp.wasm') ? ('mkxp.wasm?v=' + BUILD_VER) : path; },
-            preRun: [createDummies, restoreSaves],
+            preRun: [createDummies, preloadFonts, restoreSaves],
             postRun: [preloadInit, installSavePersistHook],
             noAudioDecoding: true,
             print: (function() {
@@ -492,6 +493,7 @@
                 'js/drive.js',
                 'js/dpad.js',
                 'js/webbgm.js',
+                'js/textinput.js',
                 'manifest.webmanifest',
                 'icon-192.png',
                 'icon-512.png',

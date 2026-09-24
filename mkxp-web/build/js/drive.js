@@ -107,7 +107,17 @@ window.saveFile = function(filename, localOnly) {
     // persists normally.
     if (window.__inSaveFile) return;
     const fpath = '/game/' + filename;
-    if (!FS.analyzePath(fpath).exists) return;
+    if (!FS.analyzePath(fpath).exists) {
+        // WEB PORT: the game deleted this save -> drop the stored copy too, otherwise
+        // loadFiles() would resurrect it on the next boot.
+        localforage.removeItem(namespace + filename);
+        localforage.getItem(namespace, function(err, res) {
+            if (err || !res || !res.hasOwnProperty(filename)) return;
+            delete res[filename];
+            localforage.setItem(namespace, res);
+        });
+        return;
+    }
 
     window.__inSaveFile = true;
     try {
@@ -322,3 +332,25 @@ function getLazyAsset(url, filename, callback, noretry, attempt) {
 
     abortTimer = setTimeout(() => fail("start timeout"), 10000);
 }
+
+// WEB PORT: the engine enumerates Fonts/*.ttf|otf ONCE at startup (to learn each font's
+// family name), but createDummies left them as 1-byte placeholders -> every custom font
+// failed to open and all text fell back to the bundled Liberation Sans. Fetch the real
+// font files into MEMFS before main() runs (preRun + run dependency, after createDummies).
+window.preloadFonts = function() {
+    var fonts = mappingArray.filter(function(m) {
+        return /^fonts\//.test(m[0]) && /\.(ttf|otf)\?/i.test(m[1]);
+    });
+    if (!fonts.length) return;
+    var add = Module.addRunDependency, rem = Module.removeRunDependency;
+    if (add) add('preload-fonts');
+    Promise.all(fonts.map(function(m) {
+        return fetch('gameasync/' + m[1])
+            .then(function(r) { if (!r.ok) throw new Error(r.status + ' ' + m[1]); return r.arrayBuffer(); })
+            .then(function(buf) {
+                FS.writeFile('/game/' + m[1].split('?')[0], new Uint8Array(buf));
+                window.fileAsyncCache[m[0]] = 1;
+            })
+            .catch(function(e) { console.error('font preload failed', e); });
+    })).then(function() { if (rem) rem('preload-fonts'); });
+};

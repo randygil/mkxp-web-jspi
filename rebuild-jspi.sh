@@ -43,7 +43,7 @@ if [ "${REBUILD_DEPS}" = "1" ]; then
   # symbols (__wasm_lpad_context/_Unwind_CallPersonality). Those bins are NOT needed
   # -- mkxp only links libmruby.a, and mkxp's own link (full libc++ + -fwasm-exceptions)
   # DOES provide them. So a bin-link failure after libmruby.a is archived is fine.
-  ( cd deps/mruby && cp -f ../../extra/build_config.rb ./ && (patch -p0 --forward < ../../extra/vm.c.patch || true) && make clean && make ) || true
+  ( cd deps/mruby && cp -f ../../extra/build_config.rb ./ && (patch -p0 --forward < ../../extra/vm.c.patch || true) && (patch -p0 --forward < ../../extra/mruby-web.patch || true) && make clean && make ) || true
   test -f deps/mruby/build/wasm32-unknown-gnu/lib/libmruby.a || { echo "MRUBY BUILD FAILED (no libmruby.a)"; exit 1; }
 fi
 

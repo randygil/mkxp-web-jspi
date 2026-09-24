@@ -10,6 +10,7 @@ rm -rf deps/mruby/build
 cd deps/mruby
 cp -f ../../extra/build_config.rb ./
 patch -p0 --forward < ../../extra/vm.c.patch || true
+patch -p0 --forward < ../../extra/mruby-web.patch || true
 make clean || true
 make
 cd /src/mkxp-web

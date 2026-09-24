@@ -3,6 +3,27 @@
 This fork (RGSS-Web / mkxp-web-jspi) modifies pulsejet/mkxp-web. Per GPL-2.0 §2(a),
 the significant changes and the date they were made:
 
+## 2026-09 — Pokemon Essentials v20/v21 (mkxp-z) games
+
+- `extra/mruby-web.patch` (applied after `vm.c.patch`): hash index for the mruby symbol
+  table (stock 2.1.2 degrades to a linear scan; ~15x faster frames with Essentials),
+  `OP_ARYCAT` no longer aliases the splatted array (`f(*a, x)` mutated `a`), instance
+  variables on Array/String subclasses.
+- `extra/build_config.rb`, `CMakeLists.txt` — 64-bit `Integer` (`MRB_INT64`; 32-bit
+  values >= 2**31 used to become Float), mruby method cache, `MKXP_RGSS_VERSION` build
+  option (1 = XP, 2 = VX default; `src/config.cpp`), `MKXP_WEB_PROFILE` build
+  (`--profiling-funcs`).
+- `binding-mruby` — `Font#name=` implemented (was a no-op, so every game fell back to the
+  bundled font), String/Array font names; `Bitmap.max_size`, `Bitmap#mega?`; natives
+  `web_fetch_file`, `web_resolve_path`, `web_readdir`, `web_mkdir`, `web_text_input`,
+  `web_text_gets`.
+- `build/js` — fonts preloaded before boot, deleted saves removed from IndexedDB,
+  `textinput.js` (typed text for `Input.gets`, on-screen keyboard on touch devices).
+- `tools/essentials/` — script packager, mkxp-z/Ruby 3 API shim and porting patches for
+  Essentials games (see its README).
+- Fixes: `extra/convert_audio.sh` wrote to a non-existent `CONV/` dir and deleted the
+  originals; Dockerfile lacked `rsync`/`timidity`; `.gitattributes` keeps `*.sh` LF.
+
 ## 2026 — run script-heavy RGSS1 (XP) and RGSS2 (VX) games in the browser
 
 **Event loop (the key change)**

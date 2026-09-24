@@ -71,8 +71,9 @@ fi
 echo ">>> Building mruby"
 if [ ! -f "mruby/build/wasm32-unknown-gnu/lib/libmruby.a" ]; then
   cd mruby
-  cp ../../extra/build_config.rb ../../extra/vm.c.patch ./
+  cp ../../extra/build_config.rb ../../extra/vm.c.patch ../../extra/mruby-web.patch ./
   patch -p0 --forward < vm.c.patch || true
+  patch -p0 --forward < mruby-web.patch || true
   make clean
   make
   cd ..

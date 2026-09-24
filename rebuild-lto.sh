@@ -27,7 +27,7 @@ if [ ! -f deps/mruby/build/wasm32-unknown-gnu/lib/libmruby.a ]; then
   rm -rf deps/mruby/build
   # --forward skips the vm.c patch if already applied; || true keeps bin-link failures
   # (mirb/mruby/mrbc can't resolve wasm-EH personality syms) non-fatal -- only libmruby.a matters.
-  ( cd deps/mruby && cp -f ../../extra/build_config.rb ./ && (patch -p0 --forward < ../../extra/vm.c.patch || true) && make clean && make ) || true
+  ( cd deps/mruby && cp -f ../../extra/build_config.rb ./ && (patch -p0 --forward < ../../extra/vm.c.patch || true) && (patch -p0 --forward < ../../extra/mruby-web.patch || true) && make clean && make ) || true
   test -f deps/mruby/build/wasm32-unknown-gnu/lib/libmruby.a || { echo "MRUBY BUILD FAILED (no libmruby.a)"; exit 1; }
 else
   echo ">>> reusing existing libmruby.a ($(ls -la deps/mruby/build/wasm32-unknown-gnu/lib/libmruby.a | awk '{print $5}') bytes) -- delete deps/mruby/build to force a rebuild"

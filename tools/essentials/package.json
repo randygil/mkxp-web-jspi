@@ -1,0 +1,9 @@
+{
+  "name": "mkxp-web-essentials-tools",
+  "private": true,
+  "description": "Headless Chrome helpers to run/drive/profile an mkxp-web build (see README.md)",
+  "type": "module",
+  "dependencies": {
+    "puppeteer-core": "^25.12.0"
+  }
+}

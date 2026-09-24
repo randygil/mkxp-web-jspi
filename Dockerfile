@@ -16,11 +16,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 # - mm-common/libtool/autoconf/automake: libsigc++ & pixman autotools builds
 # - rake/ruby/bison: mruby build
 # - imagemagick/xxd(vim-common)/file/coreutils: gameasync processing (make_mapping.sh)
+# - rsync: import-game.sh copies the game tree; timidity: MIDI -> OGG (convert_audio.sh)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake git python3 python3-pip wget curl unzip xz-utils \
       ca-certificates pkg-config autoconf automake libtool mm-common \
       ruby rake bison \
-      imagemagick vim-common file coreutils ffmpeg \
+      imagemagick vim-common file coreutils ffmpeg rsync timidity \
     && rm -rf /var/lib/apt/lists/*
 
 # Emscripten SDK (pinned)

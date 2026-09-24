@@ -1,0 +1,212 @@
+# mkxp-web mruby 2.1.2 patch set #2 (apply AFTER vm.c.patch), from within deps/mruby:
+#   patch -p0 --forward < ../../extra/mruby-web.patch
+# Found while running Pokemon Essentials v21 (Pokemon Anil) games:
+#  1. src/symbol.c  PERF: real hash index for symbol lookup. Stock 2.1.2 has 256 buckets
+#     chained by an 8-bit delta and falls back to a LINEAR scan of the whole symbol table
+#     once chains get sparse; with tens of thousands of symbols that was ~90% of the CPU
+#     time (find_symbol+memcmp) -> ~15x faster frames (38ms -> 2.5ms of Ruby per frame).
+#  2. src/vm.c      OP_ARYCAT: copy instead of alias the splatted array. `f(*a, x)` was
+#     appending x to the caller's own array `a` (fixed upstream in later mruby).
+#  3. src/variable.c  instance variables on Array/String subclasses (e.g. PBAnimation <
+#     Array) via a side table, instead of raising "cannot set instance variable".
+--- src/symbol.c
++++ src/symbol.c
+@@ -123,6 +123,64 @@
+     return hash & 0xff;
+ }
+ 
++/* WEB PORT PERF: real hash index for symbol lookup.
++ * Stock 2.1.2 keeps 256 buckets chained through an 8-bit `prev` delta; as soon as two
++ * consecutive symbols of a bucket are more than 255 ids apart (routine once a program has
++ * a few thousand symbols) the lookup falls back to a LINEAR backwards scan of the whole
++ * table with a memcmp per entry.
++ * Pokemon Essentials + plugins have tens of thousands of symbols and intern at runtime
++ * (send / respond_to? / to_sym / instance_variable_get), which made ~90% of the CPU time
++ * find_symbol+memcmp. This open-addressing index (sym ids, linear probing) makes it O(1).
++ * One index per mrb_state (mkxp and mrbc each use a single state). */
++#include <stdlib.h>
++static struct {
++  mrb_state *mrb;
++  uint32_t *slot;
++  uint32_t mask;
++  uint32_t n;
++} symidx_tab;
++
++static uint32_t
++symhash32(const char *key, size_t len)
++{
++  uint32_t hash = 2166136261u;
++  size_t i;
++  for (i = 0; i < len; ++i) {
++    hash ^= (uint8_t)key[i];
++    hash *= 16777619u;
++  }
++  return hash;
++}
++
++static void
++symidx_put(mrb_state *mrb, mrb_sym i)
++{
++  uint32_t h = symhash32(mrb->symtbl[i].name, mrb->symtbl[i].len) & symidx_tab.mask;
++  while (symidx_tab.slot[h]) h = (h + 1) & symidx_tab.mask;
++  symidx_tab.slot[h] = (uint32_t)i;
++  symidx_tab.n++;
++}
++
++static void
++symidx_rebuild(mrb_state *mrb, size_t want)
++{
++  uint32_t cap = 1024;
++  mrb_sym i;
++  while (cap < want * 2) cap <<= 1;
++  free(symidx_tab.slot);
++  symidx_tab.slot = (uint32_t*)calloc(cap, sizeof(uint32_t));
++  symidx_tab.mask = cap - 1;
++  symidx_tab.n = 0;
++  symidx_tab.mrb = mrb;
++  for (i = 1; i <= mrb->symidx; i++) symidx_put(mrb, i);
++}
++
++static void
++symidx_ensure(mrb_state *mrb)
++{
++  if (symidx_tab.mrb != mrb || !symidx_tab.slot) symidx_rebuild(mrb, (size_t)mrb->symidx + 1);
++}
++
+ static mrb_sym
+ find_symbol(mrb_state *mrb, const char *name, size_t len, uint8_t *hashp)
+ {
+@@ -137,6 +195,20 @@
+   hash = symhash(name, len);
+   if (hashp) *hashp = hash;
+ 
++  {
++    uint32_t h, j;
++    symidx_ensure(mrb);
++    h = symhash32(name, len) & symidx_tab.mask;
++    while ((j = symidx_tab.slot[h]) != 0) {
++      sname = &mrb->symtbl[j];
++      if (sname->len == len && memcmp(sname->name, name, len) == 0) {
++        return (mrb_sym)j<<SYMBOL_NORMAL_SHIFT;
++      }
++      h = (h + 1) & symidx_tab.mask;
++    }
++    return 0;
++  }
++
+   i = mrb->symhash[hash];
+   if (i == 0) return 0;
+   do {
+@@ -205,6 +277,10 @@
+   }
+   mrb->symhash[hash] = mrb->symidx = sym;
+ 
++  symidx_ensure(mrb);
++  if ((symidx_tab.n + 1) * 2 > symidx_tab.mask + 1) symidx_rebuild(mrb, (size_t)sym + 1);
++  else symidx_put(mrb, sym);
++
+   return sym<<SYMBOL_NORMAL_SHIFT;
+ }
+ 
+@@ -287,6 +363,11 @@
+     }
+   }
+   mrb_free(mrb, mrb->symtbl);
++  if (symidx_tab.mrb == mrb) {
++    free(symidx_tab.slot);
++    symidx_tab.slot = NULL;
++    symidx_tab.mrb = NULL;
++  }
+ }
+ 
+ void
+--- src/vm.c
++++ src/vm.c
+@@ -2473,7 +2473,10 @@
+     CASE(OP_ARYCAT, B) {
+       mrb_value splat = mrb_ary_splat(mrb, regs[a+1]);
+       if (mrb_nil_p(regs[a])) {
+-        regs[a] = splat;
++        /* WEB PORT: copy, don't alias. `f(*a, x)` compiles to LOADNIL; ARYCAT; ARYPUSH,
++         * so aliasing made the ARYPUSH append x to the caller's own array `a`
++         * (fixed upstream in later mruby). */
++        regs[a] = mrb_ary_new_from_values(mrb, RARRAY_LEN(splat), RARRAY_PTR(splat));
+       }
+       else {
+         mrb_ary_concat(mrb, regs[a], splat);
+--- src/variable.c
++++ src/variable.c
+@@ -320,6 +320,41 @@
+   }
+ }
+ 
++
++/* WEB PORT (mkxp-web): Array/String have no iv slot in mruby, but RGSS code
++ * (e.g. Essentials PBAnimation < Array) stores ivars on them. Keep those in a
++ * side table: $__mkxpweb_ext_iv[object_id] = [obj, {sym => value}]. Holding obj
++ * keeps it alive, so an object_id is never reused while its entry exists. */
++#include <mruby/hash.h>
++static mrb_bool
++ext_iv_p(mrb_value obj)
++{
++  return mrb_type(obj) == MRB_TT_ARRAY || mrb_type(obj) == MRB_TT_STRING;
++}
++
++static mrb_value
++ext_iv_hash(mrb_state *mrb, mrb_value obj, mrb_bool create)
++{
++  mrb_sym gsym = mrb_intern_lit(mrb, "$__mkxpweb_ext_iv");
++  mrb_value tbl = mrb_gv_get(mrb, gsym);
++  mrb_value key, ent;
++  if (!mrb_hash_p(tbl)) {
++    if (!create) return mrb_nil_value();
++    tbl = mrb_hash_new(mrb);
++    mrb_gv_set(mrb, gsym, tbl);
++  }
++  key = mrb_fixnum_value(mrb_obj_id(obj));
++  ent = mrb_hash_get(mrb, tbl, key);
++  if (mrb_nil_p(ent)) {
++    if (!create) return mrb_nil_value();
++    ent = mrb_ary_new_capa(mrb, 2);
++    mrb_ary_push(mrb, ent, obj);
++    mrb_ary_push(mrb, ent, mrb_hash_new(mrb));
++    mrb_hash_set(mrb, tbl, key, ent);
++  }
++  return mrb_ary_ref(mrb, ent, 1);
++}
++
+ MRB_API mrb_value
+ mrb_obj_iv_get(mrb_state *mrb, struct RObject *obj, mrb_sym sym)
+ {
+@@ -336,6 +371,10 @@
+   if (obj_iv_p(obj)) {
+     return mrb_obj_iv_get(mrb, mrb_obj_ptr(obj), sym);
+   }
++  if (ext_iv_p(obj)) {
++    mrb_value h = ext_iv_hash(mrb, obj, FALSE);
++    if (!mrb_nil_p(h)) return mrb_hash_get(mrb, h, mrb_symbol_value(sym));
++  }
+   return mrb_nil_value();
+ }
+ 
+@@ -405,6 +444,9 @@
+   if (obj_iv_p(obj)) {
+     mrb_obj_iv_set(mrb, mrb_obj_ptr(obj), sym, v);
+   }
++  else if (ext_iv_p(obj)) {
++    mrb_hash_set(mrb, ext_iv_hash(mrb, obj, TRUE), mrb_symbol_value(sym), v);
++  }
+   else {
+     mrb_raise(mrb, E_ARGUMENT_ERROR, "cannot set instance variable");
+   }
+@@ -425,6 +467,10 @@
+ MRB_API mrb_bool
+ mrb_iv_defined(mrb_state *mrb, mrb_value obj, mrb_sym sym)
+ {
++  if (ext_iv_p(obj)) {
++    mrb_value h = ext_iv_hash(mrb, obj, FALSE);
++    return !mrb_nil_p(h) && mrb_hash_key_p(mrb, h, mrb_symbol_value(sym));
++  }
+   if (!obj_iv_p(obj)) return FALSE;
+   return mrb_obj_iv_defined(mrb, mrb_obj_ptr(obj), sym);
+ }

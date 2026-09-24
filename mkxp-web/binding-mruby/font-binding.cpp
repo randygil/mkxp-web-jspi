@@ -26,8 +26,27 @@
 #include "exception.h"
 
 #include <mruby/string.h>
+#include <mruby/array.h>
 
 DEF_TYPE(Font);
+
+/* WEB PORT: RGSS accepts a font name as a String or an Array of fallback names. */
+static void collectFontNames(mrb_state *mrb, mrb_value obj, std::vector<std::string> &out)
+{
+	if (mrb_string_p(obj))
+	{
+		out.push_back(std::string(RSTRING_PTR(obj), RSTRING_LEN(obj)));
+	}
+	else if (mrb_array_p(obj))
+	{
+		for (mrb_int i = 0; i < RARRAY_LEN(obj); ++i)
+		{
+			mrb_value e = mrb_ary_ref(mrb, obj, i);
+			if (mrb_string_p(e))
+				out.push_back(std::string(RSTRING_PTR(e), RSTRING_LEN(e)));
+		}
+	}
+}
 
 MRB_FUNCTION(fontDoesExist)
 {
@@ -44,17 +63,17 @@ MRB_FUNCTION(fontDoesExist)
 
 MRB_METHOD(fontInitialize)
 {
-	char *name = 0;
+	mrb_value nameObj = mrb_nil_value();
 	mrb_int size = 0;
 
-	mrb_get_args(mrb, "|zi", &name, &size);
+	mrb_int argc = mrb_get_args(mrb, "|oi", &nameObj, &size);
 
 	Font *f;
 
 	std::vector<std::string> names;
-	names.push_back(name);
+	collectFontNames(mrb, nameObj, names);
 
-	f = new Font(&names, size);
+	f = new Font(argc >= 1 ? &names : 0, size);
 
 	setPrivateData(self, f, FontType);
 
@@ -96,24 +115,18 @@ MRB_METHOD(FontGetName)
 
 MRB_METHOD(FontSetName)
 {
-	// TODO: Fix this implementation
-	// It should be able to handle both string and array sets
-#if 0
 	Font *f = getPrivateData<Font>(mrb, self);
 
 	mrb_value name;
-	mrb_get_args(mrb, "S", &name);
+	mrb_get_args(mrb, "o", &name);
 
 	std::vector<std::string> names;
-	names.push_back(RSTRING_PTR(name));
+	collectFontNames(mrb, name, names);
 
 	f->setName(names);
 	mrb_iv_set(mrb, self, mrb_intern_cstr(mrb, "name"), name);
 
 	return name;
-#else
-	return mrb_nil_value();
-#endif
 }
 
 template<class C>
@@ -156,10 +169,10 @@ MRB_METHOD(FontGetDefaultName)
 MRB_METHOD(FontSetDefaultName)
 {
 	mrb_value nameObj;
-	mrb_get_args(mrb, "S", &nameObj);
+	mrb_get_args(mrb, "o", &nameObj);
 
 	std::vector<std::string> names;
-	names.push_back(RSTRING_PTR(nameObj));
+	collectFontNames(mrb, nameObj, names);
 
 	Font::setDefaultName(names, shState->fontState());
 	mrb_iv_set(mrb, self, mrb_intern_cstr(mrb, "default_name"), nameObj);

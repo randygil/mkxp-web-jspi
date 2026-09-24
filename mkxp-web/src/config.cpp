@@ -42,6 +42,12 @@ extern "C" {
 #include <errno.h>
 #endif
 
+/* WEB PORT: RGSS version this build targets (1 = XP, 2 = VX). Set with the
+ * MKXP_RGSS_VERSION environment variable at cmake time. */
+#ifndef MKXP_RGSS_VERSION
+#define MKXP_RGSS_VERSION 2
+#endif
+
 /* http://stackoverflow.com/a/1031773 */
 static bool validUtf8(const char *string)
 {
@@ -191,15 +197,17 @@ void Config::read(int argc, char *argv[])
 
 	PO_DESC_ALL;
 	gameFolder = "game";
-	fixedFramerate = 40;
+	/* XP builds: let Graphics.frame_rate= drive the limiter (Pokemon Essentials sets 60, like
+	 * mkxp-z's syncToRefreshrate); VX builds keep this fork's historical fixed 40. */
+	fixedFramerate = (MKXP_RGSS_VERSION == 1) ? 0 : 40;
 	syncToRefreshrate = false;
-	/* RGSS2 / RPG Maker VX build. This fork strips config-file and Game.ini parsing
-	 * (readGameINI never reads the ini), and the rgssVersion auto-detect there is gated
-	 * on `== 0`, so the version must be pinned here. Upstream/XP default was
-	 * rgssVersion=1 + 640x480; VX is 2 + 544x416. */
-	rgssVersion = 2;
-	defScreenW = 544;
-	defScreenH = 416;
+	/* This fork strips config-file and Game.ini parsing (readGameINI never reads the ini),
+	 * and the rgssVersion auto-detect there is gated on `== 0`, so the version is pinned at
+	 * build time: MKXP_RGSS_VERSION=1 (XP, 640x480, Scripts.rxdata -- e.g. Pokemon
+	 * Essentials) or 2 (VX, 544x416, Scripts.rvdata; the default). See CMakeLists.txt. */
+	rgssVersion = MKXP_RGSS_VERSION;
+	defScreenW = (MKXP_RGSS_VERSION == 1) ? 640 : 544;
+	defScreenH = (MKXP_RGSS_VERSION == 1) ? 480 : 416;
 	/* WEB PORT: was `enableBlitting = false`, which made main.cpp null out
 	 * gl.BlitFramebuffer even when the context provides it. With a WebGL2
 	 * context (see main.cpp) native blits are available and MUCH faster than
@@ -290,9 +298,8 @@ void Config::readGameINI()
 	std::string iniFilename = execName + ".ini";
 	SDLRWStream iniFile(iniFilename.c_str(), "r");
 
-	/* RGSS2 / VX: scripts live in Data/Scripts.rvdata. This fork does not parse Game.ini,
-	 * so the path is pinned here (XP used "Data/Scripts.rxdata"). */
-	game.scripts = "Data/Scripts.rvdata";
+	/* This fork does not parse Game.ini, so the path is pinned per RGSS version. */
+	game.scripts = (MKXP_RGSS_VERSION == 1) ? "Data/Scripts.rxdata" : "Data/Scripts.rvdata";
 	strReplace(game.scripts, '\\', '/');
 	game.title = "mkxp";
 

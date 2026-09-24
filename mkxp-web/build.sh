@@ -99,8 +99,9 @@ fi
 if [ ! -f "mruby/build/wasm32-unknown-gnu/lib/libmruby.a" ]
 then
     cd mruby
-    cp ../../extra/build_config.rb ../../extra/vm.c.patch ./
+    cp ../../extra/build_config.rb ../../extra/vm.c.patch ../../extra/mruby-web.patch ./
     patch -p0 --forward < vm.c.patch
+    patch -p0 --forward < mruby-web.patch
     make clean
     make
     cd ..

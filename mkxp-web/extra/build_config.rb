@@ -1,6 +1,8 @@
 MRuby::Build.new do |conf|
     toolchain :gcc
     conf.gembox 'default'
+    # WEB PORT: 64-bit Integer (see the cross build below); keep host mrbc consistent.
+    conf.cc.defines << 'MRB_INT64'
 end
 
 MRuby::CrossBuild.new('wasm32-unknown-gnu') do |conf|
@@ -34,6 +36,18 @@ MRuby::CrossBuild.new('wasm32-unknown-gnu') do |conf|
     conf.cc.flags = %W(-O3 -g0 -flto -fwasm-exceptions -sSUPPORT_LONGJMP=wasm)
     conf.cxx.command = 'em++'
     conf.cxx.flags = %W(-O3 -g0 -flto -std=c++14 -fwasm-exceptions -sSUPPORT_LONGJMP=wasm)
+
+    # WEB PORT: 64-bit Integer. On wasm32 mruby defaults to 32-bit mrb_int, so any value
+    # >= 2**31 silently becomes a Float (Pokémon Essentials trainer IDs are 32-bit
+    # unsigned -> "expected Integer, got Float"). MUST match mkxp (CMakeLists -DMRB_INT64).
+    conf.cc.defines << 'MRB_INT64'
+    conf.cxx.defines << 'MRB_INT64'
+    # WEB PORT PERF: global method cache (off by default in 2.1.2). Big games (Essentials
+    # + dozens of plugins = deep alias chains / ancestors) otherwise walk the class chain
+    # with a khash lookup per class on EVERY call. Changes mrb_state layout -> MUST match
+    # mkxp (CMakeLists add_definitions).
+    conf.cc.defines += %w(MRB_METHOD_CACHE MRB_METHOD_CACHE_SIZE=4096)
+    conf.cxx.defines += %w(MRB_METHOD_CACHE MRB_METHOD_CACHE_SIZE=4096)
 
     conf.linker.command = 'emcc'
     conf.archiver.command = 'emar'

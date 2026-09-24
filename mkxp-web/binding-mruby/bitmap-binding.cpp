@@ -20,6 +20,7 @@
 */
 
 #include "bitmap.h"
+#include "glstate.h"
 #include "font.h"
 #include "exception.h"
 #include "sharedstate.h"
@@ -63,6 +64,20 @@ MRB_METHOD(bitmapInitialize)
 		wrapProperty(mrb, fontProp, &font->getOutColor(), CSout_color, ColorType);
 
 	return self;
+}
+
+/* WEB PORT: mkxp-z API used by Essentials v21 (TilesetWrapper): the GL texture
+ * size limit, and whether a bitmap is a CPU-side "mega surface" above it. */
+MRB_FUNCTION(bitmapMaxSize)
+{
+	MRB_FUN_UNUSED_PARAM;
+	return mrb_fixnum_value(glState.caps.maxTexSize);
+}
+
+MRB_METHOD(bitmapMega)
+{
+	Bitmap *b = getPrivateData<Bitmap>(mrb, self);
+	return mrb_bool_value(b->megaSurface() != 0);
 }
 
 MRB_METHOD(bitmapWidth)
@@ -302,7 +317,12 @@ MRB_METHOD(bitmapSetFont)
 
 	GUARD_EXC( b->setFont(*font); )
 
-	return mrb_nil_value();
+	/* keep the Ruby-side Font#name of bitmap.font in sync with the copied font */
+	mrb_value own = getProperty(mrb, self, CSfont);
+	mrb_sym nameSym = mrb_intern_cstr(mrb, "name");
+	mrb_iv_set(mrb, own, nameSym, mrb_iv_get(mrb, fontObj, nameSym));
+
+	return fontObj;
 }
 
 INITCOPY_FUN(Bitmap)
@@ -321,6 +341,8 @@ bitmapBindingInit(mrb_state *mrb)
 	mrb_define_method(mrb, klass, "width",       bitmapWidth,      MRB_ARGS_NONE());
 	mrb_define_method(mrb, klass, "height",      bitmapHeight,     MRB_ARGS_NONE());
 	mrb_define_method(mrb, klass, "rect",        bitmapRect,       MRB_ARGS_NONE());
+	mrb_define_class_method(mrb, klass, "max_size", bitmapMaxSize, MRB_ARGS_NONE());
+	mrb_define_method(mrb, klass, "mega?",       bitmapMega,       MRB_ARGS_NONE());
 	mrb_define_method(mrb, klass, "blt",         bitmapBlt,        MRB_ARGS_REQ(4) | MRB_ARGS_OPT(1));
 	mrb_define_method(mrb, klass, "stretch_blt", bitmapStretchBlt, MRB_ARGS_REQ(3) | MRB_ARGS_OPT(1));
 	mrb_define_method(mrb, klass, "fill_rect",   bitmapFillRect,   MRB_ARGS_REQ(2) | MRB_ARGS_OPT(2));
