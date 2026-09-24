@@ -322,12 +322,65 @@ module Kernel
   def sleep(*a); 0; end unless method_defined?(:sleep) || private_method_defined?(:sleep)
 end
 
-# mkxp-z HTTPLite: no network in the web build (requests fail like an offline PC),
-# plus a small pure-Ruby JSON parser for HTTPLite::JSON.parse.
+# mkxp-z HTTPLite on the browser's fetch() (native web_http): same signatures and results,
+# {status: Integer, body: String, headers: Hash}, MKXPError on connection failure. Browser
+# limits: the server must allow CORS, forbidden headers (Host, Content-Length, User-Agent...)
+# are dropped, header names come back lowercase, and redirect = false can't see the target
+# (status 302, headers {"x-web-opaque-redirect" => "1"}).
 module HTTPLite
-  def self.get(*a);       raise MKXPError, "HTTPLite unavailable (web build)"; end
-  def self.post(*a);      raise MKXPError, "HTTPLite unavailable (web build)"; end
-  def self.post_body(*a); raise MKXPError, "HTTPLite unavailable (web build)"; end
+  # Seconds before a request is aborted (web only; mkxp-z has no equivalent setting).
+  @timeout = 30
+  # Connectivity probes that never allow CORS (network_available? in DP Scripting Utilities):
+  # fail at once instead of making requests that the browser rejects anyway.
+  WEB_NO_CORS = %w(www.google.com google.com 1.1.1.1 8.8.8.8 api.github.com)
+
+  class << self
+    attr_accessor :timeout
+
+    def get(url, headers = nil, redirect = true)
+      __request("GET", url, headers, "", nil, redirect)
+    end
+
+    def post(url, post_data, headers = nil, redirect = true)
+      body = (post_data || {}).map { |k, v| "#{__form_enc(k)}=#{__form_enc(v)}" }.join("&")
+      __request("POST", url, headers, body, "application/x-www-form-urlencoded", redirect)
+    end
+
+    def post_body(url, body, content_type, headers = nil)
+      __request("POST", url, headers, body.to_s, content_type, true)
+    end
+
+    def __form_enc(s)
+      out = ""
+      s.to_s.each_byte do |b|
+        if (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 45 || b == 46 || b == 95 || b == 126
+          out << b.chr
+        else
+          out << sprintf("%%%02X", b)
+        end
+      end
+      out
+    end
+
+    def __request(method, url, headers, body, content_type, redirect)
+      url = url.to_s
+      if url =~ /\Ahttps?:\/\/([^\/:?#]+)[:\/]?\z/i && HTTPLite::WEB_NO_CORS.include?($1.downcase)
+        raise MKXPError, "HTTPLite (web): #{url} does not allow cross-origin requests"
+      end
+      h = {}
+      (headers || {}).each { |k, v| h[k.to_s] = v.to_s }
+      h["Content-Type"] = content_type.to_s if content_type && h.keys.none? { |k| k.downcase == "content-type" }
+      t = (@timeout.to_f * 1000).to_i
+      status, hdrs, data = web_http(method, url, HTTPLite::JSON.stringify(h), body.to_s, t, redirect ? true : false)
+      raise MKXPError, data if status == 0
+      rh = {}
+      hdrs.split("\n").each do |l|
+        i = l.index(": ")
+        rh[l[0, i]] = l[(i + 2)..-1] if i
+      end
+      { :status => status, :body => data, :headers => rh }
+    end
+  end
 
   module JSON
     class ParserError < StandardError; end
@@ -340,14 +393,29 @@ module HTTPLite
       v
     end
 
+    ESC = { "\"" => "\\\"", "\\" => "\\\\", "\n" => "\\n", "\r" => "\\r", "\t" => "\\t",
+            "\b" => "\\b", "\f" => "\\f" }
+
+    # Strings are emitted as UTF-8 (only " \ and control characters are escaped), like
+    # Ruby's JSON.generate. The regexp check keeps big payloads (base64) on the fast path.
+    def self.__str(s)
+      s = s.to_s
+      return "\"" + s + "\"" unless s =~ /[\x00-\x1f"\\]/
+      "\"" + s.gsub(/[\x00-\x1f"\\]/) { |c| ESC[c] || sprintf("\\u%04x", c.getbyte(0)) } + "\""
+    end
+
     def self.stringify(obj)
       case obj
-      when Hash then "{" + obj.map { |k, v| "#{stringify(k.to_s)}:#{stringify(v)}" }.join(",") + "}"
+      when Hash then "{" + obj.map { |k, v| "#{__str(k)}:#{stringify(v)}" }.join(",") + "}"
       when Array then "[" + obj.map { |v| stringify(v) }.join(",") + "]"
-      when String then obj.inspect
-      when Symbol then obj.to_s.inspect
+      when String, Symbol then __str(obj)
       when nil then "null"
-      else obj.to_s
+      when true then "true"
+      when false then "false"
+      when Integer then obj.to_s
+      when Float then (obj.nan? || obj.infinite?) ? "null" : obj.to_s
+      when Numeric then obj.to_s
+      else __str(obj)
       end
     end
 
@@ -399,30 +467,38 @@ module HTTPLite
           raise ParserError, "expected , or ] at #{@pos}" unless c == 44
         end
       end
+      # Unescaped runs are copied with String#index (byte offsets: no MRB_UTF8_STRING), so
+      # multi-MB values (base64 saves) don't go through a per-byte Ruby loop.
       def string
         raise ParserError, "expected string at #{@pos}" unless peek == 34
         @pos += 1; out = ""
         loop do
-          raise ParserError, "unterminated string" if eos?
-          c = peek
-          if c == 34 then @pos += 1; return out
-          elsif c == 92
-            e = @s.getbyte(@pos + 1); @pos += 2
-            case e
-            when 110 then out << "\n"
-            when 116 then out << "\t"
-            when 114 then out << "\r"
-            when 98  then out << "\b"
-            when 102 then out << "\f"
-            when 117
-              cp = @s.byteslice(@pos, 4).to_i(16); @pos += 4
-              out << [cp].pack("U")
-            else out << e.chr
+          q = @s.index("\"", @pos) or raise ParserError, "unterminated string"
+          @bs = (@s.index("\\", @pos) || @n) if @bs.nil? || (@bs < @pos && @bs < @n)
+          if q < @bs
+            out << @s.byteslice(@pos, q - @pos)
+            @pos = q + 1
+            return out
+          end
+          out << @s.byteslice(@pos, @bs - @pos)
+          e = @s.getbyte(@bs + 1); @pos = @bs + 2
+          case e
+          when 110 then out << "\n"
+          when 116 then out << "\t"
+          when 114 then out << "\r"
+          when 98  then out << "\b"
+          when 102 then out << "\f"
+          when 117
+            cp = @s.byteslice(@pos, 4).to_i(16); @pos += 4
+            if cp >= 0xD800 && cp <= 0xDBFF && @s.byteslice(@pos, 2) == "\\u"
+              lo = @s.byteslice(@pos + 2, 4).to_i(16)
+              if lo >= 0xDC00 && lo <= 0xDFFF
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00); @pos += 6
+              end
             end
-          else
-            st = @pos
-            @pos += 1 while !eos? && peek != 34 && peek != 92
-            out << @s.byteslice(st, @pos - st)
+            out << [cp].pack("U")
+          when nil then raise ParserError, "unterminated string"
+          else out << e.chr
           end
         end
       end

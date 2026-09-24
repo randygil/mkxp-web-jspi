@@ -19,6 +19,13 @@ the significant changes and the date they were made:
   `web_text_gets`.
 - `build/js` — fonts preloaded before boot, deleted saves removed from IndexedDB,
   `textinput.js` (typed text for `Input.gets`, on-screen keyboard on touch devices).
+- `HTTPLite` — native `web_http` (`fetch` + `AbortController` timeout, awaited through JSPI,
+  binary-safe bodies) behind real `HTTPLite.get` / `post` / `post_body` in the Essentials shim;
+  `HTTPLite::JSON.stringify` now escapes strings properly.
+- Save persistence (`build/index.html`, `js/drive.js`) — every file written under `/game`
+  outside `Data/` is stored (not only closed `*.rxdata`), `rename` / `unlink` update IndexedDB,
+  files in subdirectories are restored, and IndexedDB writes run in order (the save index's
+  read-modify-write could drop entries on back-to-back saves).
 - `tools/essentials/` — script packager, mkxp-z/Ruby 3 API shim and porting patches for
   Essentials games (see its README).
 - Fixes: `extra/convert_audio.sh` wrote to a non-existent `CONV/` dir and deleted the

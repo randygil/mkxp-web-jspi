@@ -49,7 +49,11 @@ No game files are included; you need your own copy of the game.
   lacks:
   - `System`, `Input.triggerex?` & co.
   - text entry (`Input.text_input` / `Input.gets`, including the phone's on-screen keyboard);
-  - `HTTPLite` with a JSON parser (network calls raise, as when offline);
+  - `HTTPLite` (`get` / `post` / `post_body`, same results as mkxp-z) on the browser's `fetch`
+    through the `web_http` native, plus `HTTPLite::JSON` (`parse` / `stringify`). The server must
+    allow CORS; failures and timeouts (`HTTPLite.timeout`, 30 s by default) raise `MKXPError`.
+    Connectivity probes to hosts without CORS (google.com, 1.1.1.1...) fail at once, so
+    `network_available?` returns false without any request;
   - a real `Dir` on the browser FS;
   - case-insensitive `File`/`FileTest` lookups (the browser FS is case-sensitive, Windows isn't);
   - `File.basename(path, ext)`, `const_get("A::B")`;
@@ -70,9 +74,10 @@ These are part of the engine, not these tools.
   - `Font#name=` (it was a no-op) and the `Font.new` / `default_name=` arrays;
   - `Bitmap.max_size`, `Bitmap#mega?`;
   - `web_fetch_file`, `web_resolve_path`, `web_readdir`, `web_mkdir`, `web_text_input`,
-    `web_text_gets`.
+    `web_text_gets`, `web_http`.
 - **`build/js`**: fonts are preloaded before boot (`preloadFonts`), deleted saves are also
-  removed from IndexedDB, and `textinput.js`.
+  removed from IndexedDB, and `textinput.js`. Every file the game writes outside `Data/` (not
+  only `*.rxdata`, subdirectories too) is stored in IndexedDB, and `File.rename` moves the stored copy.
 
 ## Debugging helpers (Node + puppeteer-core, uses the system Chrome)
 

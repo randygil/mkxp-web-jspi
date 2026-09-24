@@ -22,6 +22,7 @@
 #include <mruby.h>
 #include <mruby/string.h>
 #include <mruby/compile.h>
+#include <mruby/array.h>
 
 #include <stdlib.h>
 #include <sys/time.h>
@@ -84,6 +85,66 @@ EM_JS(int, web_text_gets_js, (char* out, int outLen), {
 
 EM_JS(int, web_mkdir_js, (const char* pathC), {
 	try { FS.mkdir(UTF8ToString(pathC)); return 1; } catch (e) { return 0; }
+});
+
+/* WEB PORT: HTTP for the HTTPLite shim. fetch() + AbortController timeout; under JSPI
+ * the await suspends the wasm stack (like emscripten_sleep), so the call blocks the game
+ * like mkxp-z's HTTPLite does on PC while the browser keeps running (Web Audio BGM, input).
+ * Request/response bodies are raw bytes (ptr + length). Returns the HTTP status, or 0 on
+ * a network error / CORS rejection / timeout (the error message is then the "body").
+ * The response is kept in Module.__webHttp; the caller sizes buffers from the lengths and
+ * copies it out with web_http_take_js. headersJson is a JSON object of header strings. */
+EM_ASYNC_JS(int, web_http_js, (const char* methodC, const char* urlC, const char* headersC,
+                               const char* bodyP, int bodyLen, int timeoutMs, int redirect,
+                               int* outHdrLen, int* outBodyLen), {
+	var method = UTF8ToString(methodC), url = UTF8ToString(urlC);
+	var enc = new TextEncoder();
+	var res = { status: 0, headers: new Uint8Array(0), body: new Uint8Array(0) };
+	var fail = function(msg) { res.status = 0; res.headers = new Uint8Array(0); res.body = enc.encode(msg); };
+	var ctl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+	var timer = null, timedOut = false;
+	try {
+		var hdrs = {};
+		try { hdrs = JSON.parse(UTF8ToString(headersC) || "{}") || {}; } catch (e) {}
+		var init = { method: method, headers: new Headers(), redirect: redirect ? "follow" : "manual",
+		             cache: "no-store", credentials: "omit" };
+		Object.keys(hdrs).forEach(function(k) {
+			try { init.headers.append(k, String(hdrs[k])); } catch (e) {}
+		});
+		/* copy the body out of the heap BEFORE awaiting (memory may grow meanwhile) */
+		if (method !== "GET" && method !== "HEAD") init.body = HEAPU8.slice(bodyP, bodyP + bodyLen);
+		if (ctl) init.signal = ctl.signal;
+		if (timeoutMs > 0) timer = setTimeout(function() { timedOut = true; if (ctl) ctl.abort(); }, timeoutMs);
+		var r = await fetch(url, init);
+		var body = new Uint8Array(await r.arrayBuffer());
+		var lines = [];
+		r.headers.forEach(function(v, k) { lines.push(k + ": " + v); });
+		if (r.type === "opaqueredirect") {
+			/* redirect = false: the browser hides the 3xx status and Location */
+			res.status = 302; lines = ["x-web-opaque-redirect: 1"];
+		} else {
+			res.status = r.status || 0;
+			if (!res.status) { fail("HTTP request failed (opaque response)"); }
+		}
+		if (res.status) { res.headers = enc.encode(lines.join(String.fromCharCode(10))); res.body = body; }
+	} catch (e) {
+		if (timedOut) fail("Request timed out after " + timeoutMs + " ms: " + url);
+		else fail("Connection failed (network error or CORS rejected): " + url + " (" + (e && e.message || e) + ")");
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+	Module.__webHttp = res;
+	HEAP32[outHdrLen >> 2] = res.headers.length;
+	HEAP32[outBodyLen >> 2] = res.body.length;
+	return res.status;
+});
+
+EM_JS(void, web_http_take_js, (char* hdrOut, char* bodyOut), {
+	var res = Module.__webHttp;
+	if (!res) return;
+	if (res.headers.length) HEAPU8.set(res.headers, hdrOut);
+	if (res.body.length) HEAPU8.set(res.body, bodyOut);
+	Module.__webHttp = null;
 });
 #endif
 
@@ -240,6 +301,45 @@ MRB_FUNCTION(kernelWebTextGets)
 	return mrb_str_new_cstr(mrb, "");
 }
 
+/* WEB PORT: web_http(method, url, headers_json, body, timeout_ms, redirect)
+ *   -> [status, "name: value\n..." response headers, body]
+ * Binary-safe in both directions. status 0 = connection failure / CORS / timeout; the
+ * third element is then the error message. Backs the HTTPLite shim (essentials_shim.rb). */
+MRB_FUNCTION(kernelWebHttp)
+{
+	char *method, *url, *headers, *body;
+	mrb_int bodyLen = 0, timeoutMs = 30000;
+	mrb_bool redirect = 1;
+
+	mrb_get_args(mrb, "zzzs|ib", &method, &url, &headers, &body, &bodyLen, &timeoutMs, &redirect);
+
+#ifdef __EMSCRIPTEN__
+	int hdrLen = 0, respLen = 0;
+	int status = web_http_js(method, url, headers, body, (int) bodyLen, (int) timeoutMs,
+	                         redirect ? 1 : 0, &hdrLen, &respLen);
+	char *hdrBuf = (char*) malloc(hdrLen + 1);
+	char *respBuf = (char*) malloc(respLen + 1);
+	if (!hdrBuf || !respBuf)
+	{
+		free(hdrBuf);
+		free(respBuf);
+		mrb_raise(mrb, getMrbData(mrb)->exc[MKXP], "web_http: out of memory");
+	}
+	web_http_take_js(hdrBuf, respBuf);
+	mrb_value vals[3];
+	vals[0] = mrb_fixnum_value(status);
+	vals[1] = mrb_str_new(mrb, hdrBuf, hdrLen);
+	vals[2] = mrb_str_new(mrb, respBuf, respLen);
+	free(hdrBuf);
+	free(respBuf);
+	return mrb_ary_new_from_values(mrb, 3, vals);
+#else
+	mrb_value vals[3] = { mrb_fixnum_value(0), mrb_str_new_cstr(mrb, ""),
+	                      mrb_str_new_cstr(mrb, "web_http: not a web build") };
+	return mrb_ary_new_from_values(mrb, 3, vals);
+#endif
+}
+
 void kernelBindingInit(mrb_state *mrb)
 {
 	RClass *module = mrb->kernel_module;
@@ -253,4 +353,5 @@ void kernelBindingInit(mrb_state *mrb)
 	mrb_define_module_function(mrb, module, "web_mkdir", kernelWebMkdir, MRB_ARGS_REQ(1));
 	mrb_define_module_function(mrb, module, "web_text_input", kernelWebTextInput, MRB_ARGS_REQ(1));
 	mrb_define_module_function(mrb, module, "web_text_gets", kernelWebTextGets, MRB_ARGS_NONE());
+	mrb_define_module_function(mrb, module, "web_http", kernelWebHttp, MRB_ARGS_ARG(4, 2));
 }

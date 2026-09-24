@@ -96,6 +96,23 @@ window.loadFileAsync = function(fullPath, bitmap, callback) {
 }
 
 
+// WEB PORT: every IndexedDB write of a savefile (data + the namespace index) goes
+// through one promise chain, in call order. localforage calls are async and the index
+// is read-modify-write, so back-to-back saves (backup + tmp + rename, several slots)
+// used to race: a later write could drop an earlier file's index entry or land first.
+var saveQueue = Promise.resolve();
+var queueSave = function(fn) {
+    saveQueue = saveQueue.then(fn).catch(function(e) { console.error('save persist failed', e); });
+    return saveQueue;
+};
+var updateSaveIndex = function(mutate) {
+    return localforage.getItem(namespace).then(function(res) {
+        res = res || {};
+        if (mutate(res) === false) return;
+        return localforage.setItem(namespace, res);
+    });
+};
+
 window.saveFile = function(filename, localOnly) {
     // WEB PORT / CRITICAL FIX: FS.readFile below closes the file descriptor, and the
     // FS.close persist hook (installSavePersistHook in index.html) re-fires on that
@@ -106,15 +123,19 @@ window.saveFile = function(filename, localOnly) {
     // nested call from the close hook is a no-op, so the outer call reads once and
     // persists normally.
     if (window.__inSaveFile) return;
+    // Paths are relative to /game ("Game.rxdata", "CloudBackups/x.rxdata").
+    filename = String(filename).replace(/^\/game\//, '').replace(/^(\.\/)+/, '');
     const fpath = '/game/' + filename;
     if (!FS.analyzePath(fpath).exists) {
-        // WEB PORT: the game deleted this save -> drop the stored copy too, otherwise
-        // loadFiles() would resurrect it on the next boot.
-        localforage.removeItem(namespace + filename);
-        localforage.getItem(namespace, function(err, res) {
-            if (err || !res || !res.hasOwnProperty(filename)) return;
-            delete res[filename];
-            localforage.setItem(namespace, res);
+        // WEB PORT: the game deleted (or renamed) this file -> drop the stored copy too,
+        // otherwise loadFiles() would resurrect it on the next boot.
+        queueSave(function() {
+            return localforage.removeItem(namespace + filename).then(function() {
+                return updateSaveIndex(function(res) {
+                    if (!res.hasOwnProperty(filename)) return false;
+                    delete res[filename];
+                });
+            });
         });
         return;
     }
@@ -122,12 +143,11 @@ window.saveFile = function(filename, localOnly) {
     window.__inSaveFile = true;
     try {
         const buf = FS.readFile(fpath);
-        localforage.setItem(namespace + filename, buf);
-
-        localforage.getItem(namespace, function(err, res) {
-            if (err || !res) res = {};
-            res[filename] = { t: Number(FS.stat(fpath).mtime) };
-            localforage.setItem(namespace, res);
+        const t = Number(FS.stat(fpath).mtime);
+        queueSave(function() {
+            return localforage.setItem(namespace + filename, buf).then(function() {
+                return updateSaveIndex(function(res) { res[filename] = { t: t }; });
+            });
         });
 
         if (!localOnly) {
@@ -137,6 +157,9 @@ window.saveFile = function(filename, localOnly) {
         window.__inSaveFile = false;
     }
 };
+
+// Resolves once every queued savefile write has reached IndexedDB.
+window.flushSaves = function() { return saveQueue; };
 
 // WEB PORT: returns a Promise that resolves only AFTER every savefile has been
 // written back into MEMFS. Boot is gated on this (see restoreSaves() run-dependency
@@ -167,6 +190,12 @@ var loadFiles = function() {
                             var fpath = '/game/' + key;
                             // Don't clobber an already-present real file.
                             if (!FS.analyzePath(fpath).exists) {
+                                // Files in subdirectories (e.g. CloudBackups/): mkdir -p.
+                                var parts = key.split('/'), dir = '/game';
+                                for (var i = 0; i < parts.length - 1; i++) {
+                                    dir += '/' + parts[i];
+                                    if (!FS.analyzePath(dir).exists) FS.mkdir(dir);
+                                }
                                 FS.writeFile(fpath, res);
                                 if (Number.isInteger(meta.t)) { FS.utime(fpath, meta.t, meta.t); }
                             }

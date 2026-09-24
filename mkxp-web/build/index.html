@@ -435,17 +435,53 @@
         function installSavePersistHook() {
             try {
                 if (window.__savePersistHook || typeof FS === 'undefined') return;
+                // A file the game writes: under /game/, outside Data/, and not a game asset
+                // from the mapping (drive.js also writes those when they are downloaded).
+                // Returns the /game-relative name, or null.
+                var saveName = function(path) {
+                    if (!path) return null;
+                    path = String(path);
+                    if (path.charAt(0) !== '/') path = FS.cwd().replace(/\/$/, '') + '/' + path;
+                    if (path.indexOf('/game/') !== 0 || path.indexOf('/game/Data/') === 0) return null;
+                    var rel = path.slice('/game/'.length);
+                    var m = (typeof mapping !== 'undefined') ? mapping[getMappingKey(rel)] : null;
+                    if (m && m.split('?')[0].toLowerCase() === rel.toLowerCase()) return null;
+                    return rel;
+                };
                 var origClose = FS.close.bind(FS);
                 FS.close = function(stream) {
-                    var path = null;
-                    try { path = stream && (stream.path || (stream.node && FS.getPath(stream.node))); } catch (e) {}
+                    var path = null, wrote = false;
+                    try {
+                        path = stream && (stream.path || (stream.node && FS.getPath(stream.node)));
+                        wrote = !!stream && (stream.flags & 3) !== 0;   // O_WRONLY / O_RDWR
+                    } catch (e) {}
                     var ret = origClose(stream);
                     try {
-                        if (path && /\.rxdata$/i.test(path) &&
-                            path.indexOf('/game/') === 0 && path.indexOf('/game/Data/') !== 0) {
-                            var filename = path.slice('/game/'.length);
-                            if (window.saveFile) window.saveFile(filename, true);
-                        }
+                        // Any file the game wrote (cloud_sync.json, CloudBackups/*.rxdata,
+                        // a temp file...) plus, as before, every closed *.rxdata savefile.
+                        var rel = saveName(path);
+                        if (rel && (wrote || /\.rxdata$/i.test(rel)) && window.saveFile) window.saveFile(rel, true);
+                    } catch (e) {}
+                    return ret;
+                };
+                // File.rename (write tmp + rename over the save): store the new name and drop
+                // the old one; File.delete: drop the stored copy (saveFile sees it is gone).
+                var origRename = FS.rename.bind(FS);
+                FS.rename = function(oldPath, newPath) {
+                    var ret = origRename(oldPath, newPath);
+                    try {
+                        var o = saveName(oldPath), n = saveName(newPath);
+                        if (o && window.saveFile) window.saveFile(o, true);
+                        if (n && window.saveFile && FS.isFile(FS.stat('/game/' + n).mode)) window.saveFile(n, true);
+                    } catch (e) {}
+                    return ret;
+                };
+                var origUnlink = FS.unlink.bind(FS);
+                FS.unlink = function(path) {
+                    var ret = origUnlink(path);
+                    try {
+                        var rel = saveName(path);
+                        if (rel && window.saveFile) window.saveFile(rel, true);
                     } catch (e) {}
                     return ret;
                 };
