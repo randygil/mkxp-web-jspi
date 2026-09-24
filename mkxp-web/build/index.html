@@ -271,11 +271,9 @@
         @media (pointer: coarse) and (orientation: landscape) {
             :root { --pad: min(34vmin, 170px); --btn: min(14vmin, 68px); }
         }
-        /* On touch devices the loading spinner / file label sit top-left, clear of the pad. */
-        @media (pointer: coarse) {
-            #spinner { bottom: unset; top: calc(12px + env(safe-area-inset-top)); left: 12px; }
-            #progress { bottom: unset; top: 0; border-top-right-radius: 0; border-bottom-right-radius: 5px; }
-        }
+        /* The asset-loading spinner and the per-file progress label are debug noise for players:
+         * hidden. The elements stay in the DOM because drive.js still updates them. */
+        #spinner, #progress { display: none !important; }
 
         /* Offline download + PWA install buttons (top-right). */
         #offlinebtns {
