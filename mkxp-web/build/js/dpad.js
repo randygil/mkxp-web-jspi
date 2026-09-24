@@ -16,7 +16,7 @@
   var KEYCODE_TO_CODE = {
     37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 40: 'ArrowDown',
     13: 'Enter', 32: 'Space', 27: 'Escape', 16: 'ShiftLeft', 116: 'F5',
-    65: 'KeyA', 66: 'KeyB', 67: 'KeyC', 88: 'KeyX', 89: 'KeyY', 90: 'KeyZ'
+    65: 'KeyA', 66: 'KeyB', 67: 'KeyC', 83: 'KeyS', 88: 'KeyX', 89: 'KeyY', 90: 'KeyZ'
   };
 
   var BIND = {};          // elementId -> KeyboardEvent.code
@@ -124,6 +124,7 @@
       var tag = el.tagName;
       if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return true;
       if (el.id === 'fullscreen' || el.id === 'padtoggle' || el.id === 'menubtn') return true;
+      if (el.classList && el.classList.contains('vpad')) return true;   // gamepad body / gaps
       el = el.parentElement;
     }
     return false;
@@ -245,11 +246,13 @@
     ensureHandlers();
   };
 
-  // index.html contract: hide the controls on non-touch devices.
+  // index.html contract. "Touch device" = the PRIMARY pointer is a finger (phones,
+  // tablets). maxTouchPoints alone is also true on touch-screen laptops / some desktop
+  // Chrome builds, which showed the pad to mouse+keyboard players. Matches the CSS
+  // `@media (pointer: coarse)` rule that actually displays the pad.
   window.is_touch_device = function () {
-    return (navigator.maxTouchPoints || 0) > 0 ||
-           ('ontouchstart' in window) ||
-           (navigator.msMaxTouchPoints || 0) > 0;
+    if (window.matchMedia) return window.matchMedia('(pointer: coarse)').matches;
+    return (navigator.maxTouchPoints || 0) > 0 || ('ontouchstart' in window);
   };
 
   // Fit the canvas: fill height in landscape, width in portrait.

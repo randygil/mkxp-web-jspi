@@ -81,7 +81,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <script src="js/localforage.min.js"></script>
     <script src="js/drive.js"></script>
     <script src="js/dpad.js"></script>
@@ -179,46 +179,97 @@
             border-top-right-radius: 5px;
         }
 
-        #dpad, #apad {
+        /* ---- Virtual gamepad (touch devices only) ----------------------------------------
+         * Shown only when the primary pointer is coarse (phones/tablets); desktop never sees
+         * it, even on touch-capable laptops. Each control keeps its id for bindKey(). */
+        :root {
+            --pad: min(42vmin, 196px);
+            --btn: min(17vmin, 78px);
+            --glass: rgba(18, 20, 28, 0.55);
+            --glass-hi: rgba(255, 255, 255, 0.22);
+            --edge: rgba(255, 255, 255, 0.22);
+        }
+        .vpad {
+            display: none;
             position: fixed;
-            bottom: 0; left: 0;
-            height: 30vh; max-height: 30vw;
-            width: 30vh; max-width: 30vw;
-            transform: translate(55%, -5%);
+            z-index: 5;
+            touch-action: none;
+            -webkit-user-select: none; user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
         }
-
-        #apad {
-            right: 0; left: unset;
-            transform: unset;
-            width: 15vh; max-width: 15vw;
-        }
-
-        #dpad *, #apad * {
+        @media (pointer: coarse) { .vpad { display: block; } }
+        .vpad .key {
             position: absolute;
-            height: 15vh; max-height: 15vw;
-            width: 15vh; max-width: 15vw;
-            background-color: gray;
-            opacity: 0.3;
+            box-sizing: border-box;
+            display: flex; align-items: center; justify-content: center;
+            color: rgba(255, 255, 255, 0.85);
+            font: 700 calc(var(--btn) * 0.38)/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            transition: transform 60ms ease-out, background-color 60ms ease-out, box-shadow 60ms;
         }
+        .vpad .key.dpad-active { transform: scale(0.92); }
 
-        #apad * {
-            border-radius: 50%;
+        /* D-pad: one cross-shaped glass body, four arm hit zones with chevrons. */
+        #dpad {
+            left: calc(18px + env(safe-area-inset-left));
+            bottom: calc(18px + env(safe-area-inset-bottom));
+            width: var(--pad); height: var(--pad);
         }
+        #dpad .cross { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
+                       filter: drop-shadow(0 4px 10px rgba(0,0,0,0.45)); }
+        #dpad .key { width: 33.4%; height: 33.4%; border-radius: 10px; }
+        #dpad .key svg { width: 46%; height: 46%; opacity: 0.8; }
+        #dpad .key.dpad-active { background: var(--glass-hi); transform: none; }
+        #dpad .key.dpad-active svg { opacity: 1; }
+        #d-up    { left: 33.3%; top: 0; }
+        #d-down  { left: 33.3%; bottom: 0; }
+        #d-left  { left: 0; top: 33.3%; }
+        #d-right { right: 0; top: 33.3%; }
 
-        #d-up { transform: translateY(-100%); }
-        #d-left { transform: translateX(-100%); }
-        #d-down { transform: translateY(100%); }
-        #d-right { transform: translateX(100%); }
-        #ap-b { transform: translate(-130%, 90%); }
-        #ap-c { transform: translate(-15%, -25%); }
-        #ap-a, #ap-ka {
-            height: 7vh; max-height: 7vw;
-            width: 7vh; max-width: 7vw;
-            top: 50%;
-            transform: translate(60%, -30%);
+        /* Face buttons: A (confirm) up-right, B (back / menu) down-left, small Z (action). */
+        #apad {
+            right: calc(18px + env(safe-area-inset-right));
+            bottom: calc(18px + env(safe-area-inset-bottom));
+            width: var(--pad); height: var(--pad);
         }
-        #ap-ka {
-            transform: translate(-20%, 70%);
+        #apad .key {
+            width: var(--btn); height: var(--btn); border-radius: 50%;
+            background: var(--glass);
+            border: 1.5px solid var(--edge);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12);
+            -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+        }
+        #ap-c { right: 0; top: 18%; color: #ff8a8a; }
+        #ap-b { right: calc(var(--btn) * 1.02); top: calc(18% + var(--btn) * 0.72); color: #ffd36e; }
+        #ap-a { width: calc(var(--btn) * 0.62) !important; height: calc(var(--btn) * 0.62) !important;
+                font-size: calc(var(--btn) * 0.26); right: calc(var(--btn) * 1.28); top: 0; }
+        #apad .key.dpad-active { background: var(--glass-hi); border-color: rgba(255,255,255,0.5);
+                                 box-shadow: 0 2px 6px rgba(0,0,0,0.4), inset 0 0 12px rgba(255,255,255,0.15); }
+
+        /* Shoulder buttons: L / R = page up / down in lists (keys A / S). */
+        .shoulder {
+            bottom: calc(18px + env(safe-area-inset-bottom) + var(--pad) + 12px);
+            width: calc(var(--btn) * 1.15); height: calc(var(--btn) * 0.46);
+        }
+        .shoulder .key {
+            inset: 0; border-radius: 999px;
+            background: var(--glass); border: 1.5px solid var(--edge);
+            font-size: calc(var(--btn) * 0.24); letter-spacing: 0.08em;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.4);
+            -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+        }
+        .shoulder .key.dpad-active { background: var(--glass-hi); }
+        #lpad { left: calc(18px + env(safe-area-inset-left)); }
+        #rpad { right: calc(18px + env(safe-area-inset-right)); }
+
+        /* Landscape phones: keep the clusters clear of the (centered, 4:3) game image. */
+        @media (pointer: coarse) and (orientation: landscape) {
+            :root { --pad: min(34vmin, 170px); --btn: min(14vmin, 68px); }
+        }
+        /* On touch devices the loading spinner / file label sit top-left, clear of the pad. */
+        @media (pointer: coarse) {
+            #spinner { bottom: unset; top: calc(12px + env(safe-area-inset-top)); left: 12px; }
+            #progress { bottom: unset; top: 0; border-top-right-radius: 0; border-bottom-right-radius: 5px; }
         }
 
         /* Offline download + PWA install buttons (top-right). */
@@ -287,20 +338,22 @@
 
         <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1 width="640" height="480"></canvas>
 
-        <div id="dpad">
-            <div id="d-up"></div>
-            <div id="d-right"></div>
-            <div id="d-down"></div>
-            <div id="d-left"></div>
-            <div id="d-pl"></div>
+        <div id="dpad" class="vpad" aria-hidden="true">
+            <svg class="cross" viewBox="0 0 90 90"><path d="M36 2h18a6 6 0 0 1 6 6v22a6 6 0 0 0 6 6h14a6 6 0 0 1 6 6v6a6 6 0 0 1-6 6H66a6 6 0 0 0-6 6v14a6 6 0 0 1-6 6H36a6 6 0 0 1-6-6V60a6 6 0 0 0-6-6H10a6 6 0 0 1-6-6v-6a6 6 0 0 1 6-6h14a6 6 0 0 0 6-6V8a6 6 0 0 1 6-6z" transform="translate(0 0) scale(1)" fill="rgba(18,20,28,0.58)" stroke="rgba(255,255,255,0.22)" stroke-width="1.2"/><circle cx="45" cy="45" r="7" fill="rgba(255,255,255,0.08)"/></svg>
+            <div id="d-up" class="key"><svg viewBox="0 0 24 24" style="transform:rotate(0deg)"><path d="M6 15l6-6 6 6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div id="d-right" class="key"><svg viewBox="0 0 24 24" style="transform:rotate(90deg)"><path d="M6 15l6-6 6 6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div id="d-down" class="key"><svg viewBox="0 0 24 24" style="transform:rotate(180deg)"><path d="M6 15l6-6 6 6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div id="d-left" class="key"><svg viewBox="0 0 24 24" style="transform:rotate(270deg)"><path d="M6 15l6-6 6 6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
         </div>
 
-        <div id="apad">
-            <div id="ap-c"></div>
-            <div id="ap-b"></div>
-            <div id="ap-a"></div>
-            <div id="ap-ka"></div>
+        <div id="apad" class="vpad" aria-hidden="true">
+            <div id="ap-a" class="key">Z</div>
+            <div id="ap-c" class="key">A</div>
+            <div id="ap-b" class="key">B</div>
         </div>
+
+        <div id="lpad" class="vpad shoulder" aria-hidden="true"><div id="sh-l" class="key">L</div></div>
+        <div id="rpad" class="vpad shoulder" aria-hidden="true"><div id="sh-r" class="key">R</div></div>
     </div>
 
     <div onclick="fullscreen()" id="fullscreen">
@@ -769,12 +822,8 @@
         }, 200);
         var bitmapSizeMapping = {};
 
-        if (!is_touch_device()) {
-            document.getElementById('dpad').style.display = 'none';
-            document.getElementById('apad').style.display = 'none';
-        }
-
-        // Add all bindings
+        // Virtual gamepad bindings (the pad itself is only displayed on touch devices, via CSS).
+        //   A = C (confirm), B = X (back / menu), Z = Z, L / R = A / S (page up / down in lists)
         bindKey('d-up', 38);
         bindKey('d-right', 39);
         bindKey('d-down', 40);
@@ -782,7 +831,8 @@
         bindKey('ap-c', 67);
         bindKey('ap-b', 88);
         bindKey('ap-a', 90);
-        bindKey('ap-ka', 65);
+        bindKey('sh-l', 65);
+        bindKey('sh-r', 83);
 
         resize();
     </script>
