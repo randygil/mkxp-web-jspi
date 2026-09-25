@@ -1,7 +1,7 @@
 {
-    "name": "RGSS-Web",
-    "short_name": "RGSS-Web",
-    "description": "An RPG Maker XP (RGSS1) game running in the browser",
+    "name": "Pokémon Añil",
+    "short_name": "Pokémon Añil",
+    "description": "Pokémon Añil in the browser",
     "display": "fullscreen",
     "orientation": "landscape",
     "scope": "./",

@@ -32,6 +32,7 @@ const PRECACHE = [
   'js/drive.js',
   'js/gamepack.js',
   'js/dpad.js',
+  'js/gamepad.js',
   'gameasync/mapping.js',
   'gameasync/bitmap-map.js',
 ];

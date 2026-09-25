@@ -210,3 +210,68 @@
    if (!obj_iv_p(obj)) return FALSE;
    return mrb_obj_iv_defined(mrb, mrb_obj_ptr(obj), sym);
  }
+--- src/numeric.c
++++ src/numeric.c
+@@ -111,6 +111,15 @@
+ #endif
+ }
+ 
++/* WEB PORT: integer division rounding toward -infinity (Ruby semantics). */
++static mrb_int
++web_floor_idiv(mrb_int x, mrb_int y)
++{
++  mrb_int q = x / y;
++  if ((x % y != 0) && ((x < 0) != (y < 0))) q--;
++  return q;
++}
++
+ static mrb_value
+ integral_idiv(mrb_state *mrb, mrb_value x)
+ {
+@@ -123,9 +132,15 @@
+   return mrb_fixnum_value(mrb_fixnum(x) / mrb_fixnum(y));
+ #else
+   mrb_float y;
++  mrb_value yv = mrb_get_arg1(mrb);
+ 
++  /* WEB PORT: Ruby's div rounds toward -infinity (-20.div(32) == -1); the stock
++   * version truncated toward zero, and went through a double for two integers. */
++  if (mrb_fixnum_p(x) && mrb_fixnum_p(yv) && mrb_fixnum(yv) != 0) {
++    return mrb_fixnum_value(web_floor_idiv(mrb_fixnum(x), mrb_fixnum(yv)));
++  }
+   mrb_get_args(mrb, "f", &y);
+-  return mrb_int_value(mrb, mrb_to_flo(mrb, x) / y);
++  return mrb_int_value(mrb, floor(mrb_to_flo(mrb, x) / y));
+ #endif
+ }
+ 
+@@ -166,6 +181,20 @@
+ #endif
+ }
+ 
++/* WEB PORT: Integer#/ reached as a method call (send(:/), method(:/), a Float
++ * receiver's Integral#/ ...) must agree with the OP_DIV fast path in vm.c: two
++ * integers give a floored Integer, like Ruby, instead of a Float. */
++static mrb_value
++integral_slash(mrb_state *mrb, mrb_value x)
++{
++  mrb_value y = mrb_get_arg1(mrb);
++
++  if (mrb_fixnum_p(x) && mrb_fixnum_p(y)) {
++    return mrb_fixnum_value(mrb_fixnum(y) ? web_floor_idiv(mrb_fixnum(x), mrb_fixnum(y)) : 0);
++  }
++  return integral_div(mrb, x);
++}
++
+ static mrb_value
+ integral_coerce_step_counter(mrb_state *mrb, mrb_value self)
+ {
+@@ -1595,7 +1624,7 @@
+ 
+   integral = mrb_define_module(mrb, "Integral");
+   mrb_define_method(mrb, integral,"**",       integral_pow,    MRB_ARGS_REQ(1));
+-  mrb_define_method(mrb, integral,"/",        integral_div,    MRB_ARGS_REQ(1)); /* 15.2.{8,9}.3.6  */
++  mrb_define_method(mrb, integral,"/",        integral_slash,  MRB_ARGS_REQ(1)); /* 15.2.{8,9}.3.6  */
+   mrb_define_method(mrb, integral,"quo",      integral_div,    MRB_ARGS_REQ(1)); /* 15.2.7.4.5 (x) */
+   mrb_define_method(mrb, integral,"div",      integral_idiv,   MRB_ARGS_REQ(1));
+   mrb_define_method(mrb, integral,"<=>",      integral_cmp,    MRB_ARGS_REQ(1)); /* 15.2.{8,9}.3.1  */

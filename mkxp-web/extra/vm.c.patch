@@ -7,7 +7,8 @@
 #     to call super"; fall back to self's real class instead of raising.
 #  2. (~L1593) super garbage-mid: when the alias-corrupted `mid` is not a valid
 #     symbol (mrb_sym_name == NULL), make super a no-op instead of crashing.
-#  3. (~L2262) fixnum division: original mkxp-web fix (integer / integer path).
+#  3. (~L2262) fixnum division: original mkxp-web fix (integer / integer path),
+#     rounding toward -infinity like Ruby (C truncates: -20 / 32 == 0, Ruby says -1).
 #  4. (~L2842) escaping-proc env-unshare: force-unshare the top-level env after each
 #     top-level load so escaping procs (Events.on* += proc{}) don't reference a
 #     clobbered on-stack self after later loads/GC -> fixes "undefined method" from
@@ -61,7 +62,7 @@
          mrb_sym missing = mrb_intern_lit(mrb, "method_missing");
  
          if (mid != missing) {
-@@ -2262,13 +2287,15 @@
+@@ -2262,13 +2287,24 @@
        switch (TYPES2(mrb_type(regs[a]),mrb_type(regs[a+1]))) {
        case TYPES2(MRB_TT_FIXNUM,MRB_TT_FIXNUM):
  #ifdef MRB_WITHOUT_FLOAT
@@ -69,7 +70,17 @@
          {
            mrb_int x = mrb_fixnum(regs[a]);
            mrb_int y = mrb_fixnum(regs[a+1]);
-           SET_INT_VALUE(regs[a], y ? x / y : 0);
+-          SET_INT_VALUE(regs[a], y ? x / y : 0);
++          /* WEB PORT: Ruby floors integer division (-20 / 32 == -1); C's `/` truncates
++           * toward zero (0). Essentials' TilemapRenderer splits a negative camera offset
++           * (small maps centred on screen) into `display / 32` tiles + `display % 32`
++           * pixels, so truncating drew interior maps one tile off their collision. */
++          mrb_int q = 0;
++          if (y) {
++            q = x / y;
++            if ((x % y != 0) && ((x < 0) != (y < 0))) q--;
++          }
++          SET_INT_VALUE(regs[a], q);
          }
 +        NEXT;
          break;
@@ -78,7 +89,7 @@
          x = (mrb_float)mrb_fixnum(regs[a]);
          y = (mrb_float)mrb_fixnum(regs[a+1]);
          break;
-@@ -2842,7 +2869,28 @@
+@@ -2842,7 +2878,28 @@
    }
    if (mrb->c->ci == mrb->c->cibase) {
      mrb->c->ci->env = NULL;
