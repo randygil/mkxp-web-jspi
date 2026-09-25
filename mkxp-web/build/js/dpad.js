@@ -66,6 +66,31 @@
     return el ? el.id : null;
   }
 
+  // Touches we own, from touchstart to touchend: tid -> 'dpad' | 'btn'. Kept even while
+  // the finger is over a gap, so sliding Up -> (corner) -> Right keeps working without
+  // lifting the finger (held[] alone forgot the touch as soon as it left a key).
+  var tracked = {};
+
+  // D-pad as a virtual stick: the direction comes from the angle to the pad's centre,
+  // not from which key box is under the finger, so rolling the thumb around never hits
+  // a dead corner. Small dead zone in the middle; the finger may drift past the edge.
+  var DPAD_DIRS = { up: 'd-up', right: 'd-right', down: 'd-down', left: 'd-left' };
+  function inDpad(x, y) {
+    var el = document.elementFromPoint(x, y);
+    while (el && el.id !== 'dpad') el = el.parentElement;
+    return !!el;
+  }
+  function dpadDirAt(x, y) {
+    var pad = document.getElementById('dpad');
+    if (!pad) return null;
+    var r = pad.getBoundingClientRect();
+    if (!r.width) return null;
+    var dx = x - (r.left + r.width / 2), dy = y - (r.top + r.height / 2);
+    if (Math.sqrt(dx * dx + dy * dy) < r.width * 0.12) return null;
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? DPAD_DIRS.right : DPAD_DIRS.left;
+    return dy > 0 ? DPAD_DIRS.down : DPAD_DIRS.up;
+  }
+
   // Press/hold a control for a given touch id; releasing whatever that touch held before.
   function press(elementId, tid) {
     if (held[tid] === elementId) return;
@@ -136,7 +161,8 @@
     if (e.touches && e.touches.length === 2) {
       var onCtl = false;
       for (var j = 0; j < e.touches.length; j++) {
-        if (controlAt(e.touches[j].clientX, e.touches[j].clientY)) { onCtl = true; break; }
+        var tj = e.touches[j];
+        if (tj.identifier in tracked || controlAt(tj.clientX, tj.clientY) || inDpad(tj.clientX, tj.clientY)) { onCtl = true; break; }
       }
       if (!onCtl) {
         e.preventDefault();
@@ -148,8 +174,13 @@
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
       var id = controlAt(t.clientX, t.clientY);
-      if (id) {
+      if (inDpad(t.clientX, t.clientY)) {
         e.preventDefault();
+        tracked[t.identifier] = 'dpad';
+        press(dpadDirAt(t.clientX, t.clientY), t.identifier);
+      } else if (id) {
+        e.preventDefault();
+        tracked[t.identifier] = 'btn';
         press(id, t.identifier);
       } else if (mouseTid === null && !isUiElement(t.clientX, t.clientY)) {  // game area -> pointer
         mouseTid = t.identifier;
@@ -164,9 +195,13 @@
     var acted = false;
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
-      if (t.identifier in held) {
+      var kind = tracked[t.identifier];
+      if (kind === 'dpad') {
         acted = true;
-        press(controlAt(t.clientX, t.clientY), t.identifier);   // null -> release (slid off)
+        press(dpadDirAt(t.clientX, t.clientY), t.identifier);   // null -> centre (release)
+      } else if (kind === 'btn') {
+        acted = true;
+        press(controlAt(t.clientX, t.clientY), t.identifier);   // null -> in a gap (release)
       } else if (t.identifier === mouseTid) {
         acted = true;
         fireMouse('mousemove', t.clientX, t.clientY, 1);
@@ -178,8 +213,9 @@
   function onEnd(e) {
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
-      if (t.identifier in held) {
+      if (t.identifier in tracked || t.identifier in held) {
         e.preventDefault();
+        delete tracked[t.identifier];
         release(t.identifier);
       } else if (t.identifier === mouseTid) {
         e.preventDefault();
