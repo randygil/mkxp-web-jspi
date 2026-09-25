@@ -159,14 +159,16 @@
             return localforage.getItem(flagKey()).catch(function () { return null; });
         },
 
-        // gamepack.json of the deployed build, or null (no pack published / offline).
+        // gamepack.json of the deployed build; null ONLY when the deployment has no pack
+        // (404). Any other failure (offline, timeout, 5xx, bad JSON) throws, so callers don't
+        // mistake a transient error for "no pack" and fall back to the per-file download.
         fetchMeta: async function () {
-            try {
-                var r = await fetch('gamepack.json', { cache: 'no-store' });
-                if (!r.ok) return null;
-                var m = await r.json();
-                return (m && m.id && m.file && m.size) ? m : null;
-            } catch (e) { return null; }
+            var r = await fetch('gamepack.json', { cache: 'no-store' });
+            if (r.status === 404) return null;
+            if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching gamepack.json');
+            var m = await r.json();
+            if (!m || !m.id || !m.file || !m.size) throw new Error('invalid gamepack.json');
+            return m;
         },
 
         // Download (or resume) `meta`'s pack into OPFS, then switch to it.

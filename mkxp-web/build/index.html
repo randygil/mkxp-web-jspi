@@ -697,8 +697,13 @@
                 alert('Offline storage (Cache Storage) is not available in this browser.');
                 return;
             }
-            var meta = await GamePack.fetchMeta();
-            if (!meta) return downloadGameFiles();
+            var meta;
+            try { meta = await GamePack.fetchMeta(); }
+            catch (e) {
+                setDlUI('error', null, 'Could not reach the server (' + (e && e.message ? e.message : e) + '). Try again.');
+                return;
+            }
+            if (!meta) return downloadGameFiles();   // this deployment has no game pack
             if (!GamePack.supported()) {
                 alert('This browser cannot store the offline game (Origin Private File System not available).');
                 return;
@@ -866,7 +871,7 @@
                         btn.textContent = '↻ Update game';
                         btn.title = 'A new version is available (' + mb(meta.size) + ' MB). Until then, changed files load from the network.';
                     }
-                });
+                }).catch(function () {});
             });
 
             function legacyLabel() {
