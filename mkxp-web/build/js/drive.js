@@ -287,8 +287,38 @@ window.fileLoadedAsync = function(file) {
         .catch(function() {});
 };
 
+// WEB PORT: game files come from the offline pack (js/gamepack.js) when the player has
+// downloaded it and the pack holds this exact version (md5); otherwise from the network.
+function getLazyAsset(url, filename, callback, noretry) {
+    if (window.GamePack && url.indexOf('gameasync/') === 0) {
+        GamePack.whenReady()
+            .then(function() { return GamePack.read(url); })
+            .catch(function() { return null; })
+            .then(function(data) {
+                if (data) callback(data);
+                else getNetworkAsset(url, filename, callback, noretry);
+            });
+        return;
+    }
+    getNetworkAsset(url, filename, callback, noretry);
+}
+
+// Promise<ArrayBuffer> of a "gameasync/..." URL, from the offline pack or the network.
+window.fetchGameAsset = function(url) {
+    var fromPack = window.GamePack
+        ? GamePack.whenReady().then(function() { return GamePack.read(url); }).catch(function() { return null; })
+        : Promise.resolve(null);
+    return fromPack.then(function(data) {
+        if (data) return data;
+        return fetch(url).then(function(r) {
+            if (!r.ok) throw new Error(r.status + ' ' + url);
+            return r.arrayBuffer();
+        });
+    });
+};
+
 var activeStreams = [];
-function getLazyAsset(url, filename, callback, noretry, attempt) {
+function getNetworkAsset(url, filename, callback, noretry, attempt) {
     // WEB PORT (fix): previously a fetch that did NOT return HTTP 200-399 -- a 404, or a
     // status-0 / network-error / aborted response (e.g. a transient failure through the
     // service worker) -- never called the callback (onreadystatechange only handled the
@@ -326,7 +356,7 @@ function getLazyAsset(url, filename, callback, noretry, attempt) {
         try { xhr.abort(); } catch (e) {}
         clearStream();
         if (attempt < MAX_ATTEMPTS) {
-            getLazyAsset(url, filename, callback, noretry, attempt + 1);
+            getNetworkAsset(url, filename, callback, noretry, attempt + 1);
         } else {
             console.warn("getLazyAsset: giving up on", url, "(" + why + ") after", attempt, "attempt(s)");
             pdiv.innerHTML = `${filename} - skip`;
@@ -374,8 +404,7 @@ window.preloadFonts = function() {
     var add = Module.addRunDependency, rem = Module.removeRunDependency;
     if (add) add('preload-fonts');
     Promise.all(fonts.map(function(m) {
-        return fetch('gameasync/' + m[1])
-            .then(function(r) { if (!r.ok) throw new Error(r.status + ' ' + m[1]); return r.arrayBuffer(); })
+        return fetchGameAsset('gameasync/' + m[1])
             .then(function(buf) {
                 FS.writeFile('/game/' + m[1].split('?')[0], new Uint8Array(buf));
                 window.fileAsyncCache[m[0]] = 1;

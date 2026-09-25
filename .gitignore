@@ -25,3 +25,8 @@ scripts_src/
 # === Logs & OS cruft ===
 *.log
 .DS_Store
+
+# Offline game pack (gen-pack.py) — built from the game content, never committed
+mkxp-web/build/gamepack-*.zip
+mkxp-web/build/gamepack-*.zip.tmp
+mkxp-web/build/gamepack.json

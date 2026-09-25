@@ -84,6 +84,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <script src="js/localforage.min.js"></script>
     <script src="js/drive.js"></script>
+    <script src="js/gamepack.js"></script>
     <script src="js/dpad.js"></script>
     <script src="gameasync/mapping.js"></script>
     <!-- Frame-independent BGM player (needs getMappingKey from drive.js + mapping). Optional:
@@ -393,6 +394,9 @@
         var wTitle = 'RGSS-Web';
         document.title = wTitle;
 
+        // Open the downloaded offline pack (if any) right away; asset loads wait for it.
+        GamePack.mount();
+
         // Cache-buster for the engine binary: mkxp.wasm / mkxp.js have no hash in
         // their URL, so set BUILD_VER to your build id on every engine rebuild to
         // force clients (and the Service Worker) to refetch the new binary.
@@ -570,11 +574,11 @@
 
         // ============================================================================
         // Offline "Download game" — full offline install.
-        // Bulk-fetches every game asset into a stable Cache Storage bucket (ASSET_CACHE in
-        // sw.js) so the game can boot and play with the server down / no network. Resumable
-        // (skips anything already cached), bounded-concurrency, quota-aware, and prunes assets
-        // from older versions on a re-run (delta update). Needs the Service Worker (sw.js)
-        // registered and mapping.js loaded (mappingArray / mapping globals).
+        // Preferred: the whole game as ONE zip (gamepack-<id>.zip + gamepack.json, built by
+        // gen-pack.py) stored in OPFS and read in place by js/gamepack.js (downloadGame).
+        // Fallback when no pack is deployed: bulk-fetch every game asset into a stable Cache
+        // Storage bucket (downloadGameFiles). Either way the engine + page shell go into
+        // ASSET_CACHE (sw.js) so the game boots with the server down / no network.
         // ============================================================================
         var OFFLINE_ASSET_CACHE = 'rgss-web-assets';   // MUST match ASSET_CACHE in sw.js
         var OFFLINE_FLAG_KEY = namespace + '__offline';
@@ -588,6 +592,7 @@
                 'gameasync/mapping.js',
                 'js/localforage.min.js',
                 'js/drive.js',
+                'js/gamepack.js',
                 'js/dpad.js',
                 'js/webbgm.js',
                 'js/textinput.js',
@@ -652,7 +657,101 @@
             }
         }
 
+        // Cache the engine + page shell so the game can boot with no network.
+        async function cacheOfflineShell() {
+            var cache = await caches.open(OFFLINE_ASSET_CACHE);
+            var urls = offlineShellUrls();
+            for (var i = 0; i < urls.length; i++) {
+                var resp = await fetch(urls[i], { cache: 'no-cache' });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status + ' fetching ' + urls[i]);
+                await cache.put(urls[i], resp);
+            }
+        }
+
+        // Game files cached one by one (older per-file download, or plain lazy loads) are
+        // redundant once the pack is installed: free that space.
+        async function pruneCachedGameFiles() {
+            try {
+                var cache = await caches.open(OFFLINE_ASSET_CACHE);
+                var keys = await cache.keys();
+                for (var i = 0; i < keys.length; i++) {
+                    var path = new URL(keys[i].url).pathname;
+                    if (/\/gameasync\//.test(path) && !/\/gameasync\/(mapping|bitmap-map)\.js$/.test(path)) {
+                        try { await cache.delete(keys[i]); } catch (e) {}
+                    }
+                }
+            } catch (e) {}
+        }
+
+        function mb(bytes) { return (bytes / 1048576).toFixed(bytes < 104857600 ? 1 : 0); }
+
+        // Offline download: ONE zip (gamepack-<id>.zip, built by gen-pack.py) into OPFS, read
+        // in place by js/gamepack.js. Falls back to the per-file download below when the
+        // deployment has no gamepack.json.
         async function downloadGame() {
+            if (typeof WebAssembly.Suspending !== 'function') {
+                alert('This browser does not support JSPI, so the game cannot run here and downloading would be pointless.\n\nUse Chrome/Edge 137+ or Firefox 153+ on desktop.');
+                return;
+            }
+            if (!('caches' in window)) {
+                alert('Offline storage (Cache Storage) is not available in this browser.');
+                return;
+            }
+            var meta = await GamePack.fetchMeta();
+            if (!meta) return downloadGameFiles();
+            if (!GamePack.supported()) {
+                alert('This browser cannot store the offline game (Origin Private File System not available).');
+                return;
+            }
+            try {
+                var installed = await GamePack.installed();
+                if (installed && installed.id === meta.id) {
+                    setDlUI('progress', 100, 'Checking…');
+                    await cacheOfflineShell();
+                    setDlUI('done', 100, 'Game already downloaded — playable offline.');
+                    return;
+                }
+
+                var persisted = false;
+                if (navigator.storage && navigator.storage.persist) {
+                    try { persisted = await navigator.storage.persist(); } catch (e) {}
+                }
+                var spaceNote = '';
+                if (navigator.storage && navigator.storage.estimate) {
+                    try {
+                        var est = await navigator.storage.estimate();
+                        if (est && est.quota) {
+                            var free = est.quota - (est.usage || 0);
+                            spaceNote = '\nFree space for this site: ~' + mb(free) + ' MB.';
+                            if (free < meta.size) spaceNote += '\nThat may NOT be enough.';
+                        }
+                    } catch (e) {}
+                }
+                var what = installed ? 'Download the new version of the game' : 'Download the whole game';
+                if (!confirm(what + ' (' + mb(meta.size) + ' MB, ' + meta.count + ' files in one package) for offline play?' +
+                             spaceNote + '\n\nYou can keep playing while it downloads. If it gets interrupted, click again to resume.')) {
+                    return;
+                }
+
+                setDlUI('progress', 0, 'Preparing…');
+                await cacheOfflineShell();
+                await GamePack.download(meta, function (got, total) {
+                    setDlUI('progress', Math.floor((got / total) * 100), mb(got) + ' / ' + mb(total) + ' MB');
+                });
+                await pruneCachedGameFiles();
+                try { await localforage.removeItem(OFFLINE_FLAG_KEY); } catch (e) {}
+
+                setDlUI('done', 100, persisted ? 'Game downloaded — playable offline (storage protected).'
+                                               : 'Game downloaded — playable offline.');
+            } catch (e) {
+                console.error('downloadGame failed', e);
+                if (e && e.quota) setDlUI('error', null, 'Not enough disk space. Free some up and retry — progress is kept.');
+                else setDlUI('error', null, 'Failed: ' + (e && e.message ? e.message : e) + ' — click to resume.');
+            }
+        }
+
+        // Per-file download into Cache Storage (used when no gamepack.json is deployed).
+        async function downloadGameFiles() {
             if (typeof WebAssembly.Suspending !== 'function') {
                 alert('This browser does not support JSPI, so the game cannot run here and downloading would be pointless.\n\nUse Chrome/Edge 137+ or Firefox 153+ on desktop.');
                 return;
@@ -753,19 +852,38 @@
         // Reflect a prior install in the button label on load.
         (function () {
             if (!('caches' in window) || typeof localforage === 'undefined') return;
-            localforage.getItem(OFFLINE_FLAG_KEY).then(function (rec) {
+            GamePack.installed().then(function (pack) {
+                if (!pack) return legacyLabel();
                 var btn = document.getElementById('dlbtn');
-                if (!rec || !btn) return;
-                var current = rec.sig ? (rec.sig === offlineContentSig()) : (rec.ver === BUILD_VER);
-                if (current) {
-                    btn.classList.add('done');
-                    btn.textContent = '✓ Game downloaded';
-                    btn.title = 'Game already downloaded on this browser. Click to verify / complete.';
-                } else {
-                    btn.textContent = '↻ Update game';
-                    btn.title = 'A new version is available. Click to download the changed files.';
-                }
-            }).catch(function () {});
+                if (!btn) return;
+                btn.classList.add('done');
+                btn.textContent = '✓ Game downloaded';
+                btn.title = 'Game already downloaded on this browser.';
+                // Offline, or no pack published: keep "downloaded".
+                GamePack.fetchMeta().then(function (meta) {
+                    if (meta && meta.id !== pack.id) {
+                        btn.classList.remove('done');
+                        btn.textContent = '↻ Update game';
+                        btn.title = 'A new version is available (' + mb(meta.size) + ' MB). Until then, changed files load from the network.';
+                    }
+                });
+            });
+
+            function legacyLabel() {
+                localforage.getItem(OFFLINE_FLAG_KEY).then(function (rec) {
+                    var btn = document.getElementById('dlbtn');
+                    if (!rec || !btn) return;
+                    var current = rec.sig ? (rec.sig === offlineContentSig()) : (rec.ver === BUILD_VER);
+                    if (current) {
+                        btn.classList.add('done');
+                        btn.textContent = '✓ Game downloaded';
+                        btn.title = 'Game already downloaded on this browser. Click to verify / complete.';
+                    } else {
+                        btn.textContent = '↻ Update game';
+                        btn.title = 'A new version is available. Click to download the changed files.';
+                    }
+                }).catch(function () {});
+            }
         })();
 
         // ============================================================================

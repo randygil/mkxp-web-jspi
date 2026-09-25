@@ -5,6 +5,7 @@
 *
 !mkxp-web
 !deploy
+!gen-pack.py
 
 # under mkxp-web, keep ONLY the built game
 mkxp-web/*
@@ -15,6 +16,9 @@ mkxp-web/build/.claude
 mkxp-web/build/.htaccess
 mkxp-web/build/**/*.bak
 mkxp-web/build/**/*.orig
+# the offline pack is rebuilt inside the image (deploy/Dockerfile)
+mkxp-web/build/gamepack-*
+mkxp-web/build/gamepack.json
 
 # never send VCS / OS cruft even if a rule above would include it
 .git

@@ -66,7 +66,11 @@ this runs emulated; the WASM output is identical.
 7. **Generate per-map preloads.** `gen-preload.rb` Marshal-loads each `Data/Map*.rxdata`,
    collects referenced asset names, and writes `build/preload/Data/MapNNN.rxdata.json`
    prefetch lists (optional; reduces first-touch stalls).
-8. **Set namespace + title.** Rewrites `var namespace` and `var wTitle` in
+8. **Build the offline game pack.** `gen-pack.py` zips every file in `mapping.js` into
+   `build/gamepack-<id>.zip` (media stored, data deflated, each entry tagged with its md5)
+   and writes `build/gamepack.json`. The **Download game** button fetches this single file
+   into the browser's private file system for offline play (see `docs/DEPLOY.md`).
+9. **Set namespace + title.** Rewrites `var namespace` and `var wTitle` in
    `build/index.html`.
 
 After this, `build/gameasync/` is populated and `mkxp.wasm` is unchanged. Serve `build/`
@@ -294,6 +298,15 @@ Then make the loader refetch the new scripts — **either** re-run `regen-mappin
 recomputes the `?h=` md5) **or** manually bump the `Scripts.rxdata ?h=` hash in
 `build/gameasync/mapping.js`. If you skip this, the browser/Service Worker may serve the old
 cached `Scripts.rxdata` and your changes won't take effect.
+
+Then rebuild the offline pack so **Download game** ships the new files:
+
+```bash
+python3 gen-pack.py
+```
+
+(A stale pack is still safe: the loader only uses pack entries whose md5 matches the current
+`mapping.js`, and fetches the rest from the network.)
 
 > The Service Worker (offline + fast reloads) requires a secure context, so production must
 > be HTTPS. See `docs/DEPLOY.md` for serving requirements (`.wasm` must be served as

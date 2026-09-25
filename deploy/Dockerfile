@@ -13,6 +13,12 @@ WORKDIR /srv
 COPY mkxp-web/build/ ./
 # belt-and-suspenders: drop dev-only/non-served files (also excluded by .dockerignore)
 RUN rm -rf .claude .htaccess .dockerignore Dockerfile 2>/dev/null || true
+# Offline game pack for the "Download game" button (gen-pack.py): one zip of every game
+# file + gamepack.json. Built here rather than committed -- GitHub rejects files > 100 MB --
+# and reproducible, so an unchanged game yields byte-identical packs across deploys.
+RUN apk add --no-cache python3
+COPY gen-pack.py /tmp/gen-pack.py
+RUN python3 /tmp/gen-pack.py /srv && rm /tmp/gen-pack.py
 RUN set -eu; \
     find . -type f \( \
          -name '*.wasm' -o -name '*.js' -o -name '*.mjs' -o -name '*.json' \

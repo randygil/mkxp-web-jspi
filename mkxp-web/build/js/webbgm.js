@@ -106,7 +106,8 @@
     var loop = LOOP_TABLE[String(path).toLowerCase()] || null;
     var myGen = ++gen;
     if (bufCache[url]) { startBuffer(url, bufCache[url], volume, pitch, loop); return; }
-    fetch(url).then(function (r) { return r.arrayBuffer(); }).then(function (ab) {
+    (window.fetchGameAsset ? window.fetchGameAsset(url)
+                           : fetch(url).then(function (r) { return r.arrayBuffer(); })).then(function (ab) {
       var c = audioCtx(); if (!c) return;
       var done = function (buffer) {
         if (myGen !== gen || !buffer) return;      // a newer play/stop superseded this

@@ -45,12 +45,12 @@
 	# --- Cache-Control ---
 	# Immutable: the engine (loaded ?v=BUILD_VER) + all content-hashed game media
 	# (loaded ?h=<md5>). The URL changes whenever the bytes change, so cache 1 year.
-	@immutable path *.wasm /mkxp.js /gameasync/*
+	@immutable path *.wasm /mkxp.js /gameasync/* /gamepack-*.zip
 	header @immutable Cache-Control "public, max-age=31536000, immutable"
 
 	# Revalidate: unversioned shell files that change on redeploy. Listed AFTER the
 	# immutable rule so these win for the overlapping paths (e.g. gameasync/mapping.js).
-	@shell path / /index.html /sw.js /manifest.webmanifest /gameasync/mapping.js /gameasync/bitmap-map.js /js/*
+	@shell path / /index.html /sw.js /manifest.webmanifest /gamepack.json /gameasync/mapping.js /gameasync/bitmap-map.js /js/*
 	header @shell Cache-Control "no-cache"
 
 	# No COOP/COEP: the build is single-threaded (no SharedArrayBuffer), so cross-

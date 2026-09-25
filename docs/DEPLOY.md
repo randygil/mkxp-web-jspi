@@ -74,11 +74,22 @@ development). Two ways to get TLS:
 
 The harness also exposes two optional buttons (top-right of `index.html`):
 
-- **Download game** — bulk-precaches every asset into the stable cache for full offline
-  play; resumable, quota-aware, and does **delta updates** (only changed `?h=` files are
-  refetched, stale ones pruned).
+- **Download game** — full offline play. When `gamepack.json` is deployed (built by
+  `gen-pack.py`), it downloads the whole game as **one zip** (`gamepack-<id>.zip`) into the
+  Origin Private File System with a worker (`js/gamepack-worker.js`), resuming interrupted
+  downloads with HTTP `Range`; `js/gamepack.js` then serves every game file from that zip
+  (no extraction, no per-file requests). The engine + page shell go into the stable cache.
+  A new deploy shows **Update game**; until the player updates, only the files whose md5
+  changed load from the network. Without `gamepack.json` it falls back to precaching every
+  asset one by one into the stable cache.
 - **Install app** — PWA install via `beforeinstallprompt` (Add-to-Home-Screen / standalone),
   backed by `manifest.webmanifest` + `icon-*.png`. Ship your own icons/manifest name per game.
+
+**The game pack needs `Range` support** (Caddy, nginx, Apache and most CDNs have it) and
+must not be re-compressed (zip is not in Caddy's `encode` types; don't add it). The deploy
+image carries both `gameasync/` and the pack, so it is roughly twice the game size. On CDNs
+with a per-file cache limit (e.g. Cloudflare free: 512 MB) the pack is served uncached from
+the origin, which works but costs origin bandwidth.
 
 **Redeploying is transparent:** bump `BUILD_VER` in `index.html` (engine) and the changed
 assets' `?h=` hashes in `mapping.js` — clients fetch the new bytes, and the version-URL scheme
